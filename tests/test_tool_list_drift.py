@@ -12,7 +12,6 @@ import importlib.util
 import io
 import json
 import re
-import socket
 import sys
 import urllib.error
 from pathlib import Path
@@ -38,6 +37,13 @@ from hextile_mcp import (  # noqa: E402
     _MUTATING,
     _READ_ONLY,
 )
+
+INSTALL_SPEC = importlib.util.spec_from_file_location(
+    "hextile_codex_install", ROOT / "codex" / "install.py"
+)
+assert INSTALL_SPEC is not None and INSTALL_SPEC.loader is not None
+INSTALL_MODULE = importlib.util.module_from_spec(INSTALL_SPEC)
+INSTALL_SPEC.loader.exec_module(INSTALL_MODULE)
 
 
 EXPECTED_SEVEN = (
@@ -71,16 +77,46 @@ def test_open4_annotations_partition() -> None:
 
 def test_skill_tool_names_subset_of_mcp() -> None:
     skill = (ROOT / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
-    # Backtick-fenced tool names and bare mentions in the tools table.
-    mentioned = set(re.findall(r"`([a-z_]+)`", skill))
-    # Only care about identifiers that look like our tools.
-    toolish = {m for m in mentioned if m in set(TOOL_NAMES) or m in EXPECTED_SEVEN}
+    tools_section = re.search(
+        r"^## Tools \(exactly 7\)$(.*?)(?=^## |\Z)", skill, re.MULTILINE | re.DOTALL
+    )
+    assert tools_section is not None, "SKILL.md tools section missing"
+    toolish = set(
+        re.findall(
+            r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|",
+            tools_section.group(1),
+            re.MULTILINE,
+        )
+    )
     # Every canonical tool must appear in the skill.
     missing_in_skill = set(TOOL_NAMES) - toolish
     assert not missing_in_skill, f"SKILL.md missing tools: {missing_in_skill}"
     # No toolish names outside the MCP list.
     extra = toolish - set(TOOL_NAMES)
     assert not extra, f"SKILL.md mentions unknown tools: {extra}"
+
+
+def test_codex_installer_removes_complete_bare_mcp_section() -> None:
+    config = """\
+[mcp_servers.hextile]
+command = "python3"
+args = ["/old/mcp.py", "--legacy"]
+env = { HEXTILE_TEST = "1" }
+
+[features]
+apps = true
+"""
+    cleaned = INSTALL_MODULE._remove_hextile_section(config)
+    assert "mcp_servers.hextile" not in cleaned
+    assert "/old/mcp.py" not in cleaned
+    assert cleaned.strip() == '[features]\napps = true'
+
+
+def test_codex_installer_toml_escapes_mcp_script_path(tmp_path: Path) -> None:
+    script = tmp_path / 'quoted "dir"' / "hextile_mcp.py"
+    block = INSTALL_MODULE.mcp_block(script)
+    escaped = json.dumps(str(script.resolve()))
+    assert f"args = [{escaped}]" in block
 
 
 def test_skill_has_no_stale_spellings() -> None:

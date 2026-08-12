@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -67,12 +68,12 @@ def write_agents_fragment() -> Path:
 
 def mcp_block(script: Path) -> str:
     # stdio only (OPEN-1). Absolute path so Codex does not depend on cwd.
-    script_s = str(script.resolve())
+    script_s = json.dumps(str(script.resolve()))
     return (
         f"{BEGIN_MARK}\n"
         f"[{MCP_SECTION}]\n"
         f'command = "python3"\n'
-        f'args = ["{script_s}"]\n'
+        f"args = [{script_s}]\n"
         f"{END_MARK}\n"
     )
 
@@ -127,10 +128,9 @@ def _remove_hextile_section(text: str) -> str:
         text = pattern.sub("", text)
     # Also strip a bare [mcp_servers.hextile] table if present without markers.
     pattern2 = re.compile(
-        r"\n?\[mcp_servers\.hextile\][^\[]*",
-        re.DOTALL,
+        r"^[ \t]*\[mcp_servers\.hextile\][ \t]*\n.*?(?=^[ \t]*\[|\Z)",
+        re.DOTALL | re.MULTILINE,
     )
-    # Careful: only remove until next [section] or EOF — pattern stops at next [
     text = pattern2.sub("\n", text)
     return text
 
