@@ -1,0 +1,21 @@
+{
+  "name": "hextile",
+  "version": "0.1.0",
+  "description": "Drive 360 Hextile workflows from Claude Code — list templates, override prompts, run renders, generate seeds.",
+  "author": {
+    "name": "Phong",
+    "url": "https://github.com/ansonphong"
+  },
+  "homepage": "https://github.com/ansonphong/hextile-agent",
+  "repository": "https://github.com/ansonphong/hextile-agent",
+  "license": "MIT",
+  "keywords": [
+    "360",
+    "panorama",
+    "hextile",
+    "workflows",
+    "diffusion",
+    "mcp"
+  ],
+  "skills": "./skills/"
+}

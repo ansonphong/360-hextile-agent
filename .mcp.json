@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hextile": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/hextile_mcp.py"]
+    }
+  }
+}

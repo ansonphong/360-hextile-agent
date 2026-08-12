@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hextile-agent",
+  "description": "360 Hextile agent plugin — Claude Code MCP tools + skill for local workflow automation",
+  "owner": {
+    "name": "Phong",
+    "url": "https://github.com/ansonphong"
+  },
+  "plugins": [
+    {
+      "name": "hextile",
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/ansonphong/hextile-agent",
+      "tags": [
+        "360",
+        "hextile",
+        "workflows",
+        "mcp",
+        "diffusion"
+      ]
+    }
+  ]
+}
