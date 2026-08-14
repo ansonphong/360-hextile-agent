@@ -70,9 +70,16 @@ class Client:
         body: Optional[Mapping[str, Any]] = None,
         *,
         timeout: Optional[float] = None,
+        params: Optional[Mapping[str, Any]] = None,
     ) -> Any:
         """HTTP JSON request. Raises HextileClientError on failure."""
         url = self._url(path)
+        if params:
+            qs = urllib.parse.urlencode(
+                {k: v for k, v in params.items() if v is not None}
+            )
+            if qs:
+                url = url + ("&" if "?" in url else "?") + qs
         data: Optional[bytes] = None
         headers = {"Accept": "application/json"}
         if body is not None:
@@ -138,8 +145,14 @@ class Client:
                 kind="app_down",
             ) from exc
 
-    def get_json(self, path: str, *, timeout: Optional[float] = None) -> Any:
-        return self.request_json("GET", path, timeout=timeout)
+    def get_json(
+        self,
+        path: str,
+        *,
+        timeout: Optional[float] = None,
+        params: Optional[Mapping[str, Any]] = None,
+    ) -> Any:
+        return self.request_json("GET", path, timeout=timeout, params=params)
 
     def post_json(
         self,
@@ -147,8 +160,19 @@ class Client:
         body: Optional[Mapping[str, Any]] = None,
         *,
         timeout: Optional[float] = None,
+        params: Optional[Mapping[str, Any]] = None,
     ) -> Any:
-        return self.request_json("POST", path, body, timeout=timeout)
+        return self.request_json(
+            "POST", path, body, timeout=timeout, params=params
+        )
+
+    def delete_json(
+        self,
+        path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        return self.request_json("DELETE", path, timeout=timeout)
 
     # ── workflows ───────────────────────────────────────────────────────
 
@@ -161,6 +185,67 @@ class Client:
         o = urllib.parse.quote(origin, safe="")
         wid = urllib.parse.quote(workflow_id, safe="")
         return self.get_json(f"/api/workflows/{o}/{wid}")
+
+    def get_capabilities(self) -> Any:
+        """GET /api/workflows/capabilities."""
+        return self.get_json("/api/workflows/capabilities")
+
+    def save_workflow(
+        self,
+        origin: str,
+        workflow_id: str,
+        document: Mapping[str, Any],
+    ) -> Any:
+        """POST /api/workflows/{origin} — create-only on user|project."""
+        origin_s = str(origin or "")
+        if origin_s == "builtin":
+            raise HextileClientError(
+                "Built-in workflows are immutable. Save to origin=user or origin=project.",
+                status_code=403,
+                kind="http",
+            )
+        if origin_s not in ("user", "project"):
+            raise HextileClientError(
+                "origin must be 'user' or 'project'",
+                status_code=None,
+                kind="other",
+            )
+        if not workflow_id:
+            raise HextileClientError(
+                "id is required", status_code=None, kind="other"
+            )
+        if not isinstance(document, Mapping):
+            raise HextileClientError(
+                "document must be a JSON object", status_code=None, kind="other"
+            )
+        o = urllib.parse.quote(origin_s, safe="")
+        return self.post_json(
+            f"/api/workflows/{o}",
+            {"id": str(workflow_id), "document": dict(document)},
+        )
+
+    def delete_workflow(self, origin: str, workflow_id: str) -> Any:
+        """DELETE /api/workflows/{origin}/{id} — user|project only."""
+        origin_s = str(origin or "")
+        if origin_s == "builtin":
+            raise HextileClientError(
+                "Built-in workflows are immutable. Delete only origin=user or origin=project.",
+                status_code=403,
+                kind="http",
+            )
+        if origin_s not in ("user", "project"):
+            raise HextileClientError(
+                "origin must be 'user' or 'project'",
+                status_code=None,
+                kind="other",
+            )
+        if not workflow_id:
+            raise HextileClientError(
+                "id is required", status_code=None, kind="other"
+            )
+        o = urllib.parse.quote(origin_s, safe="")
+        wid = urllib.parse.quote(str(workflow_id), safe="")
+        return self.delete_json(f"/api/workflows/{o}/{wid}")
 
     def run_workflow(
         self,
@@ -201,6 +286,14 @@ class Client:
         rid = urllib.parse.quote(run_id, safe="")
         return self.post_json(f"/api/renders/{rid}/stop")
 
+    def list_runs(self, lifecycle_status: str = "active") -> Any:
+        """GET /api/renders/?lifecycle_status= (default active)."""
+        status = lifecycle_status or "active"
+        return self.get_json(
+            "/api/renders/",
+            params={"lifecycle_status": status},
+        )
+
     # ── seed ────────────────────────────────────────────────────────────
 
     def generate_seed(
@@ -223,6 +316,10 @@ class Client:
         return self.post_json(
             "/api/360-lora/generate", body, timeout=GENERATE_TIMEOUT_S
         )
+
+    def list_360_loras(self) -> Any:
+        """GET /api/360-lora/loras — catalog for generate_seed path + base_model."""
+        return self.get_json("/api/360-lora/loras")
 
     # ── handshake (OPEN-3) ──────────────────────────────────────────────
 

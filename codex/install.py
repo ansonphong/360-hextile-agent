@@ -23,7 +23,7 @@ import shutil
 import sys
 from pathlib import Path
 
-PACKAGE_VERSION = "0.1.0"
+PACKAGE_VERSION = "0.2.0"
 MIN_CODEX = "0.34.0"
 MARKER_NAME = ".hextile-agent-marker"
 MCP_SECTION = "mcp_servers.hextile"
@@ -91,6 +91,13 @@ def ensure_skills(codex_home: Path, dry_run: bool) -> Path:
         return dest_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest_skill)
+    src_refs = package_root() / "skills" / "hextile" / "references"
+    dest_refs = dest_dir / "references"
+    if src_refs.is_dir():
+        if dest_refs.exists():
+            shutil.rmtree(dest_refs)
+        shutil.copytree(src_refs, dest_refs)
+        print(f"Wrote {dest_refs}")
     marker.write_text(
         f"version={PACKAGE_VERSION}\nsource={package_root()}\n",
         encoding="utf-8",

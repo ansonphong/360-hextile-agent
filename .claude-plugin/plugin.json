@@ -1,7 +1,7 @@
 {
   "name": "hextile",
-  "version": "0.1.0",
-  "description": "Drive 360 Hextile workflows from Claude Code — list templates, override prompts, run renders, generate seeds.",
+  "version": "0.2.0",
+  "description": "Drive 360 Hextile workflows from Claude Code — list/save templates, run and monitor renders, 360-LoRA seeds, bundled guides.",
   "author": {
     "name": "Phong",
     "url": "https://github.com/ansonphong"

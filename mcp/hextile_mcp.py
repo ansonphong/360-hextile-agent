@@ -4,9 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v1 tools (exactly 7):
-  list_workflows, get_workflow, run_workflow, validate_config,
-  get_status, cancel_run, generate_seed
+v1.1 tools (13): catalog + persist + run + monitor + seed + guides.
 """
 
 from __future__ import annotations
@@ -31,30 +29,61 @@ from hextile_client import (  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 
 # Canonical tool names — drift tests assert SKILL.md ⊆ this list.
 TOOL_NAMES = (
     "list_workflows",
     "get_workflow",
+    "get_capabilities",
+    "save_workflow",
+    "delete_workflow",
     "run_workflow",
     "validate_config",
     "get_status",
+    "list_runs",
     "cancel_run",
     "generate_seed",
+    "list_360_loras",
+    "get_guide",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
 _READ_ONLY = frozenset(
-    {"list_workflows", "get_workflow", "validate_config", "get_status"}
+    {
+        "list_workflows",
+        "get_workflow",
+        "get_capabilities",
+        "validate_config",
+        "get_status",
+        "list_runs",
+        "list_360_loras",
+        "get_guide",
+    }
 )
-_MUTATING = frozenset({"run_workflow", "generate_seed", "cancel_run"})
+_MUTATING = frozenset(
+    {
+        "save_workflow",
+        "delete_workflow",
+        "run_workflow",
+        "generate_seed",
+        "cancel_run",
+    }
+)
+
+GUIDE_NAMES = (
+    "workflow-schema",
+    "best-practices",
+    "website-index",
+    "recipes",
+)
+_GUIDE_ROOT = Path(__file__).resolve().parent.parent / "skills" / "hextile" / "references"
 
 
 def _annotations(name: str) -> dict[str, bool]:
     if name in _READ_ONLY:
         return {"readOnlyHint": True, "destructiveHint": False}
-    if name == "cancel_run":
+    if name in {"cancel_run", "delete_workflow"}:
         return {"readOnlyHint": False, "destructiveHint": True}
     return {"readOnlyHint": False, "destructiveHint": False}
 
@@ -100,6 +129,47 @@ TOOLS: list[dict[str, Any]] = [
                 "type": "string",
                 "description": "Workflow id (e.g. quick-scout)",
             },
+        },
+        required=["id"],
+    ),
+    _tool_def(
+        "get_capabilities",
+        "Handshake: GET /api/workflows/capabilities "
+        "(workflow_api_version + features).",
+        {},
+    ),
+    _tool_def(
+        "save_workflow",
+        "Create-only persist of a .hextile.json document on the user or "
+        "project shelf. Builtin is immutable. Existing id → HTTP 409; "
+        "use a new id or delete_workflow first.",
+        {
+            "origin": {
+                "type": "string",
+                "description": "user | project (not builtin)",
+                "default": "user",
+            },
+            "id": {
+                "type": "string",
+                "description": "New workflow id (alphanumeric, hyphen, underscore)",
+            },
+            "document": {
+                "type": "object",
+                "description": "Full .hextile.json document to save",
+            },
+        },
+        required=["id", "document"],
+    ),
+    _tool_def(
+        "delete_workflow",
+        "Delete a user or project workflow. Cannot delete builtin.",
+        {
+            "origin": {
+                "type": "string",
+                "description": "user | project",
+                "default": "user",
+            },
+            "id": {"type": "string", "description": "Workflow id to delete"},
         },
         required=["id"],
     ),
@@ -160,6 +230,18 @@ TOOLS: list[dict[str, Any]] = [
         required=["run_id"],
     ),
     _tool_def(
+        "list_runs",
+        "List library renders (monitor without a stored run_id). "
+        "Response data.renders[] includes status, progress, output_path.",
+        {
+            "lifecycle_status": {
+                "type": "string",
+                "description": "active | archived | trashed",
+                "default": "active",
+            },
+        },
+    ),
+    _tool_def(
         "cancel_run",
         "Stop a running render (status → cancelled).",
         {
@@ -190,10 +272,57 @@ TOOLS: list[dict[str, Any]] = [
         },
         required=["prompt", "lora_path", "base_model"],
     ),
+    _tool_def(
+        "list_360_loras",
+        "List installed/known 360-LoRAs. Use path + base_model on generate_seed.",
+        {},
+    ),
+    _tool_def(
+        "get_guide",
+        "Read bundled agent documentation (schema, best practices, "
+        "website index, recipes). Pass name, or omit to list guides.",
+        {
+            "name": {
+                "type": "string",
+                "description": (
+                    "workflow-schema | best-practices | website-index | "
+                    "recipes | index"
+                ),
+            },
+        },
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
+
+
+def load_guide(name: str) -> dict[str, Any]:
+    """Read an allowlisted bundled guide. Unknown/empty name lists titles."""
+    requested = (name or "index").strip().lower()
+    if requested in ("", "index", "list"):
+        return {
+            "guides": list(GUIDE_NAMES),
+            "hint": "Call get_guide with name= one of these titles.",
+        }
+    if requested not in GUIDE_NAMES:
+        raise HextileClientError(
+            f"Unknown guide {requested!r}. Available: {', '.join(GUIDE_NAMES)}",
+            status_code=None,
+            kind="other",
+        )
+    path = _GUIDE_ROOT / f"{requested}.md"
+    if not path.is_file():
+        raise HextileClientError(
+            f"Guide file missing: {path.name}",
+            status_code=None,
+            kind="other",
+        )
+    return {
+        "name": requested,
+        "path": str(path),
+        "markdown": path.read_text(encoding="utf-8"),
+    }
 
 
 def _ok_result(data: Any) -> dict[str, Any]:
@@ -212,11 +341,17 @@ class HextileMcpServer:
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "list_workflows": self._list_workflows,
             "get_workflow": self._get_workflow,
+            "get_capabilities": self._get_capabilities,
+            "save_workflow": self._save_workflow,
+            "delete_workflow": self._delete_workflow,
             "run_workflow": self._run_workflow,
             "validate_config": self._validate_config,
             "get_status": self._get_status,
+            "list_runs": self._list_runs,
             "cancel_run": self._cancel_run,
             "generate_seed": self._generate_seed,
+            "list_360_loras": self._list_360_loras,
+            "get_guide": self._get_guide,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -309,6 +444,22 @@ class HextileMcpServer:
             )
         return self.client.get_workflow(str(origin), str(wid))
 
+    def _get_capabilities(self, _args: dict[str, Any]) -> Any:
+        return self.client.get_capabilities()
+
+    def _save_workflow(self, args: dict[str, Any]) -> Any:
+        return self.client.save_workflow(
+            str(args.get("origin") or "user"),
+            str(args.get("id") or args.get("workflow_id") or ""),
+            args.get("document") or {},
+        )
+
+    def _delete_workflow(self, args: dict[str, Any]) -> Any:
+        return self.client.delete_workflow(
+            str(args.get("origin") or "user"),
+            str(args.get("id") or args.get("workflow_id") or ""),
+        )
+
     def _run_workflow(self, args: dict[str, Any]) -> Any:
         return self.client.run_workflow(
             workflow_id=args.get("workflow_id"),
@@ -336,6 +487,11 @@ class HextileMcpServer:
                 "run_id is required", status_code=None, kind="other"
             )
         return self.client.get_status(str(run_id))
+
+    def _list_runs(self, args: dict[str, Any]) -> Any:
+        return self.client.list_runs(
+            str(args.get("lifecycle_status") or "active")
+        )
 
     def _cancel_run(self, args: dict[str, Any]) -> Any:
         run_id = args.get("run_id")
@@ -377,6 +533,12 @@ class HextileMcpServer:
             n=n,
             **extra,
         )
+
+    def _list_360_loras(self, _args: dict[str, Any]) -> Any:
+        return self.client.list_360_loras()
+
+    def _get_guide(self, args: dict[str, Any]) -> Any:
+        return load_guide(str(args.get("name") or "index"))
 
     @staticmethod
     def _response(msg_id: Any, result: Any) -> dict[str, Any]:

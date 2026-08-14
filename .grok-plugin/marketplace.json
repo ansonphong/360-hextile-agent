@@ -1,0 +1,19 @@
+{
+  "name": "hextile-agent",
+  "description": "360 Hextile agent plugin — MCP tools + skill for local workflow automation",
+  "owner": {
+    "name": "Phong",
+    "url": "https://github.com/ansonphong"
+  },
+  "plugins": [
+    {
+      "name": "hextile",
+      "description": "List, save, run, and monitor 360 Hextile Workflows over localhost HTTP",
+      "category": "productivity",
+      "source": {
+        "type": "local",
+        "path": "./"
+      }
+    }
+  ]
+}

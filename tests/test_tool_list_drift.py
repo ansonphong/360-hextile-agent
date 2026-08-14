@@ -1,7 +1,7 @@
 """Local drift + handshake tests for hextile-agent (plugin repo only).
 
 - Tool names mentioned in SKILL.md ⊆ MCP TOOL_NAMES
-- Exactly 7 tools; OPEN-4 annotation sets partition
+- Tool count matches TOOL_NAMES; OPEN-4 annotation sets partition
 - Client maps connection refusal → app-down wording
 - Probe maps 404 on workflows/run → upgrade
 """
@@ -31,11 +31,13 @@ from hextile_client import (  # noqa: E402
     HextileClientError,
 )
 from hextile_mcp import (  # noqa: E402
+    GUIDE_NAMES,
     TOOL_NAMES,
     TOOLS,
     HextileMcpServer,
     _MUTATING,
     _READ_ONLY,
+    load_guide,
 )
 
 INSTALL_SPEC = importlib.util.spec_from_file_location(
@@ -46,21 +48,27 @@ INSTALL_MODULE = importlib.util.module_from_spec(INSTALL_SPEC)
 INSTALL_SPEC.loader.exec_module(INSTALL_MODULE)
 
 
-EXPECTED_SEVEN = (
+EXPECTED_TOOLS = (
     "list_workflows",
     "get_workflow",
+    "get_capabilities",
+    "save_workflow",
+    "delete_workflow",
     "run_workflow",
     "validate_config",
     "get_status",
+    "list_runs",
     "cancel_run",
     "generate_seed",
+    "list_360_loras",
+    "get_guide",
 )
 
 
-def test_exactly_seven_tools() -> None:
-    assert tuple(TOOL_NAMES) == EXPECTED_SEVEN
-    assert len(TOOLS) == 7
-    assert {t["name"] for t in TOOLS} == set(EXPECTED_SEVEN)
+def test_tool_names_match_surface() -> None:
+    assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
+    assert len(TOOLS) == len(EXPECTED_TOOLS)
+    assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
 
 
 def test_open4_annotations_partition() -> None:
@@ -78,7 +86,7 @@ def test_open4_annotations_partition() -> None:
 def test_skill_tool_names_subset_of_mcp() -> None:
     skill = (ROOT / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
     tools_section = re.search(
-        r"^## Tools \(exactly 7\)$(.*?)(?=^## |\Z)", skill, re.MULTILINE | re.DOTALL
+        r"^## Tools$(.*?)(?=^## |\Z)", skill, re.MULTILINE | re.DOTALL
     )
     assert tools_section is not None, "SKILL.md tools section missing"
     toolish = set(
@@ -198,7 +206,7 @@ def test_mcp_tools_list_rpc() -> None:
     )
     assert resp is not None
     names = [t["name"] for t in resp["result"]["tools"]]
-    assert names == list(EXPECTED_SEVEN)
+    assert names == list(EXPECTED_TOOLS)
 
 
 def test_mcp_initialize() -> None:
@@ -218,6 +226,81 @@ def test_mcp_initialize() -> None:
     assert resp is not None
     assert resp["result"]["serverInfo"]["name"] == "hextile"
     assert "tools" in resp["result"]["capabilities"]
+
+
+def test_save_workflow_rejects_builtin() -> None:
+    client = Client(opener=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no HTTP")))
+    with pytest.raises(HextileClientError) as ei:
+        client.save_workflow("builtin", "x", {"pipeline": "sd21"})
+    assert ei.value.status_code == 403
+    assert "immutable" in str(ei.value).lower()
+
+
+def test_delete_workflow_rejects_builtin() -> None:
+    client = Client(opener=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no HTTP")))
+    with pytest.raises(HextileClientError) as ei:
+        client.delete_workflow("builtin", "quick-scout")
+    assert ei.value.status_code == 403
+
+
+def test_list_runs_sends_lifecycle_query() -> None:
+    seen: dict[str, str] = {}
+
+    class _Resp:
+        status = 200
+
+        def read(self) -> bytes:
+            return json.dumps({"data": {"renders": []}}).encode()
+
+        def getcode(self) -> int:
+            return 200
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req, timeout=None):  # noqa: ANN001
+        seen["url"] = req.full_url
+        return _Resp()
+
+    client = Client(opener=opener)
+    client.list_runs("archived")
+    assert "lifecycle_status=archived" in seen["url"]
+    assert seen["url"].rstrip("/").endswith("renders") or "/renders/" in seen["url"]
+
+
+def test_get_guide_reads_real_markdown() -> None:
+    listed = load_guide("index")
+    assert set(listed["guides"]) == set(GUIDE_NAMES)
+    schema = load_guide("workflow-schema")
+    body = schema["markdown"]
+    assert "HextileConfig" in body
+    assert "input.source" in body or "`file` or `render`" in body
+    site = load_guide("website-index")
+    assert "360hextile.com/docs/hextile/" in site["markdown"]
+    assert "/docs/automation" in site["markdown"]  # says there is NO such page
+
+
+def test_mcp_get_guide_and_save_builtin() -> None:
+    server = HextileMcpServer()
+    ok = server.call_tool("get_guide", {"name": "recipes"})
+    assert ok["isError"] is False
+    assert "list_360_loras" in ok["content"][0]["text"]
+    err = server.call_tool(
+        "save_workflow",
+        {"origin": "builtin", "id": "nope", "document": {"pipeline": "sd21"}},
+    )
+    assert err["isError"] is True
+    assert "immutable" in err["content"][0]["text"].lower()
+
+
+def test_codex_install_copies_references(tmp_path: Path) -> None:
+    INSTALL_MODULE.ensure_skills(tmp_path / ".codex", dry_run=False)
+    dest = tmp_path / ".codex" / "skills" / "hextile" / "references" / "best-practices.md"
+    assert dest.is_file()
+    assert "Authority" in dest.read_text(encoding="utf-8")
 
 
 def test_py_files_compile() -> None:

@@ -36,7 +36,18 @@ Local development (this tree):
 #   skills/hextile/SKILL.md
 ```
 
-Confirm tools appear (`list_workflows`, …). With the app down, tools return a clean error — the MCP process stays up.
+Confirm tools appear (`list_workflows`, `get_guide`, …). With the app down, tools return a clean error — the MCP process stays up.
+
+## Install — Grok
+
+```bash
+grok plugin marketplace add /mnt/d/Projects/360-Hextile/hextile-agent
+grok plugin install /mnt/d/Projects/360-Hextile/hextile-agent --trust
+```
+
+Enable `hextile` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
+
+When published: `grok plugin marketplace add ansonphong/hextile-agent` then install `hextile`.
 
 ## Install — Codex
 
@@ -48,7 +59,7 @@ python3 codex/install.py
 
 This writes:
 
-- `~/.codex/skills/hextile/SKILL.md`
+- `~/.codex/skills/hextile/SKILL.md` + `references/`
 - `[mcp_servers.hextile]` **stdio** entry in `~/.codex/config.toml`  
   (`command = "python3"`, `args = ["…/mcp/hextile_mcp.py"]`)
 
@@ -62,17 +73,23 @@ Restart Codex and run `/mcp` — you should see `hextile`.
 
 Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
 
-## Tools (7)
+## Tools (13)
 
-| Tool | HTTP |
-|------|------|
+| Tool | HTTP / source |
+|------|----------------|
 | `list_workflows` | `GET /api/workflows` |
 | `get_workflow` | `GET /api/workflows/{origin}/{id}` |
+| `get_capabilities` | `GET /api/workflows/capabilities` |
+| `save_workflow` | `POST /api/workflows/{user\|project}` |
+| `delete_workflow` | `DELETE /api/workflows/{origin}/{id}` |
 | `run_workflow` | `POST /api/workflows/run` |
 | `validate_config` | same, `dry_run: true` |
 | `get_status` | `GET /api/renders/{id}` |
+| `list_runs` | `GET /api/renders/` |
 | `cancel_run` | `POST /api/renders/{id}/stop` |
 | `generate_seed` | `POST /api/360-lora/generate` |
+| `list_360_loras` | `GET /api/360-lora/loras` |
+| `get_guide` | bundled `skills/hextile/references/*.md` |
 
 Instruction surface: **`skills/hextile/SKILL.md`** (canonical).  
 Codex `AGENTS-fragment.md` is a frontmatter-stripped copy — edit SKILL only.
@@ -102,8 +119,10 @@ curl -s -X POST http://127.0.0.1:8000/api/workflows/run \
 hextile-agent/
   .claude-plugin/plugin.json
   .claude-plugin/marketplace.json
+  .grok-plugin/marketplace.json
   .mcp.json
   skills/hextile/SKILL.md
+  skills/hextile/references/
   mcp/hextile_mcp.py
   mcp/hextile_client.py
   codex/install.py
@@ -125,7 +144,8 @@ HOME=/tmp/hextile-agent-codex-test python3 codex/install.py --uninstall
 
 ## Docs
 
-Human product docs for install land in the main 360 Hextile docs site (06-docs). This README is the package-local surface.
+Bundled agent guides: `get_guide` (`workflow-schema`, `best-practices`, `website-index`, `recipes`).  
+`website-index` points at **existing** https://360hextile.com/docs/ pages (templates, pipelines, input, prompts). A dedicated Automation docs section is still 06-docs.
 
 ## License
 
