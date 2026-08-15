@@ -20,20 +20,19 @@ All merge, validation, and render logic stay in the running app at `http://127.0
 
 ## Install — Claude Code
 
-From a public clone (or local path):
+Public marketplace (this repo):
 
 ```bash
-# When published:
 /plugin marketplace add ansonphong/hextile-agent
 /plugin install hextile@hextile-agent
 ```
 
-Local development (this tree):
+Local checkout of this tree still works: add the directory as a marketplace root, then `/plugin install hextile@hextile-agent`.
 
 ```bash
-# From Claude Code, add this directory as a marketplace root, or symlink/copy
-# into your plugin search path. The package root is the plugin root:
+# package root is the plugin root:
 #   .claude-plugin/plugin.json
+#   .claude-plugin/marketplace.json
 #   .mcp.json          → python3 ${CLAUDE_PLUGIN_ROOT}/mcp/hextile_mcp.py
 #   skills/hextile/SKILL.md
 ```
@@ -44,14 +43,16 @@ Confirm tools appear (`list_workflows`, `get_guide`, …). With the app down, to
 
 ## Install — Grok
 
+Public marketplace (this repo):
+
 ```bash
-grok plugin marketplace add /mnt/d/Projects/360-Hextile/hextile-agent
-grok plugin install /mnt/d/Projects/360-Hextile/hextile-agent --trust
+grok plugin marketplace add ansonphong/hextile-agent
+grok plugin install ansonphong/hextile-agent --trust
 ```
 
 Enable `hextile` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
 
-When published: `grok plugin marketplace add ansonphong/hextile-agent` then install `hextile`.
+A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install /path/to/hextile-agent --trust`.
 
 ## Install — Codex
 
