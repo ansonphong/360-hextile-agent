@@ -14,7 +14,7 @@ All merge, validation, and render logic stay in the running app at `http://127.0
 | Requirement | Notes |
 |-------------|--------|
 | **360 Hextile running** | Backend on `127.0.0.1:8000` |
-| **python3 ≥ 3.9** | On PATH — powers the MCP proxy (zero pip installs) |
+| **python3 ≥ 3.9** | On PATH — powers the MCP proxy (zero pip installs). On Windows, Claude `.mcp.json` `command` should be `python` or `py -3`, not `python3`. Codex installer already writes `sys.executable`. |
 | App with `POST /api/workflows/run` | Workflow automation P0+ |
 | Claude Code **or** Codex ≥ 0.34.0 | Install path below |
 
@@ -37,6 +37,8 @@ Local development (this tree):
 #   .mcp.json          → python3 ${CLAUDE_PLUGIN_ROOT}/mcp/hextile_mcp.py
 #   skills/hextile/SKILL.md
 ```
+
+On Windows, change Claude `.mcp.json` `command` to `python` or `py -3` (not `python3`). Do not rewrite the committed POSIX `.mcp.json`. Codex installer already writes `sys.executable`.
 
 Confirm tools appear (`list_workflows`, `get_guide`, …). With the app down, tools return a clean error — the MCP process stays up.
 
@@ -75,7 +77,7 @@ Restart Codex and run `/mcp` — you should see `hextile`.
 
 Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
 
-## Tools (14)
+## Tools (20)
 
 | Tool | HTTP / source |
 |------|----------------|
@@ -88,10 +90,16 @@ Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-sta
 | `validate_config` | same, `dry_run: true` |
 | `get_status` | `GET /api/renders/{id}` |
 | `get_render_config` | `GET /api/renders/{id}/config` |
+| `get_logs` | `GET /api/renders/{id}/logs` |
 | `list_runs` | `GET /api/renders/` |
 | `cancel_run` | `POST /api/renders/{id}/stop` |
+| `retry_run` | `POST /api/renders/{id}/retry` |
 | `generate_seed` | `POST /api/360-lora/generate` |
+| `list_seed_history` | `GET /api/360-lora/history` |
+| `get_seed_batch` | `GET /api/360-lora/history/{batch_id}` |
+| `cancel_seed` | `POST /api/360-lora/cancel` |
 | `list_360_loras` | `GET /api/360-lora/loras` |
+| `list_installed_models` | `GET /api/models/{pipeline_id}?installed_only=true` |
 | `get_guide` | bundled `skills/hextile/references/*.md` |
 
 Instruction surface: **`skills/hextile/SKILL.md`** (canonical).  

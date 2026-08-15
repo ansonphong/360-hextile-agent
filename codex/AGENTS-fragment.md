@@ -9,7 +9,7 @@ Before composing fields or teaching the user, call `get_guide` (`workflow-schema
 ## Prerequisites
 
 1. **360 Hextile is running** (backend on `127.0.0.1:8000`).
-2. **python3 ≥ 3.9** on PATH (MCP proxy).
+2. **python3 ≥ 3.9** on PATH (MCP proxy). On Windows, Claude `.mcp.json` `command` should be `python` or `py -3`, not `python3`. Codex installer already writes `sys.executable`.
 3. App build with **`POST /api/workflows/run`** (workflow automation P0+).
 
 If a tool returns that the app is not running, tell the user verbatim:
@@ -41,12 +41,19 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `save_workflow` | Persist a **new** id on user/project | **yes** |
 | `delete_workflow` | Remove a user/project workflow | **yes** |
 | `validate_config` | Dry-run merge+validate (terraform plan) | no |
+| `list_installed_models` | Installed weights — dry-run is Pydantic only | no |
 | `run_workflow` | Queue a render after overrides | **yes** |
 | `get_status` | Poll `run_id` progress / output paths | no |
+| `get_render_config` | Read producing .hextile.json for a render | no |
+| `get_logs` | Fetch failed-run logs | no |
 | `list_runs` | Find jobs if you lost `run_id` | no |
 | `cancel_run` | Kill a long GPU run | **yes** |
+| `retry_run` | Retry a crashed/failed run (APP returns 400 otherwise); uses APP tile-reuse policy | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |
 | `generate_seed` | Create equirect seed image via 360-LoRA | **yes** |
+| `list_seed_history` | Recover seed batches after the 300s generate_seed timeout | no |
+| `get_seed_batch` | Recover one seed batch after the 300s generate_seed timeout | no |
+| `cancel_seed` | Stop the live 360-LoRA job, not a render | **yes** |
 
 ### Selection guide
 
@@ -72,7 +79,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 
 `InputSource` is `file` | `render` only. Generative producers are **not** render-time sources.
 
-1. `list_360_loras` → pick `path` and `base_model` (`sdxl` | `sd15` | `flux_schnell`).
+1. `list_360_loras` → pick `path` and `base_model` (`sdxl` | `sd15` | `flux_schnell` | `qwen_image`).
 2. `generate_seed(prompt, lora_path, base_model, n?)` → `variations` (absolute paths) + `batch_id`.
 3. Pick one path (default index 0 unless the user chooses).
 4. `run_workflow` with overrides:

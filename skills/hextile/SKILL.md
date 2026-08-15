@@ -12,7 +12,7 @@ Before composing fields or teaching the user, call `get_guide` (`workflow-schema
 ## Prerequisites
 
 1. **360 Hextile is running** (backend on `127.0.0.1:8000`).
-2. **python3 ≥ 3.9** on PATH (MCP proxy).
+2. **python3 ≥ 3.9** on PATH (MCP proxy). On Windows, Claude `.mcp.json` `command` should be `python` or `py -3`, not `python3`. Codex installer already writes `sys.executable`.
 3. App build with **`POST /api/workflows/run`** (workflow automation P0+).
 
 If a tool returns that the app is not running, tell the user verbatim:

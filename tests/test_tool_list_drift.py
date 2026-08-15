@@ -48,6 +48,7 @@ INSTALL_MODULE = importlib.util.module_from_spec(INSTALL_SPEC)
 INSTALL_SPEC.loader.exec_module(INSTALL_MODULE)
 
 
+# P5 copies this name list as a frozenset tripwire in APP backend/api/routes/agent_events.py.
 EXPECTED_TOOLS = (
     "list_workflows",
     "get_workflow",
@@ -67,6 +68,7 @@ EXPECTED_TOOLS = (
     "get_seed_batch",
     "cancel_seed",
     "list_360_loras",
+    "list_installed_models",
     "get_guide",
 )
 
