@@ -298,8 +298,8 @@ def test_mcp_get_guide_and_save_builtin() -> None:
 
 
 def test_codex_install_copies_references(tmp_path: Path) -> None:
-    INSTALL_MODULE.ensure_skills(tmp_path / ".codex", dry_run=False)
-    dest = tmp_path / ".codex" / "skills" / "hextile" / "references" / "best-practices.md"
+    INSTALL_MODULE.ensure_skills(tmp_path, dry_run=False)
+    dest = tmp_path / ".agents" / "skills" / "hextile" / "references" / "best-practices.md"
     assert dest.is_file()
     assert "Authority" in dest.read_text(encoding="utf-8")
 

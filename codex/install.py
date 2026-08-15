@@ -2,8 +2,8 @@
 """Idempotent Codex twin installer for hextile-agent.
 
 Writes:
-  ~/.codex/skills/hextile/SKILL.md
-  ~/.codex/skills/hextile/.hextile-agent-marker  (version marker)
+  ~/.agents/skills/hextile/SKILL.md
+  ~/.agents/skills/hextile/.hextile-agent-marker  (version marker)
   [mcp_servers.hextile] into ~/.codex/config.toml  (stdio only)
 
 Usage:
@@ -23,7 +23,7 @@ import shutil
 import sys
 from pathlib import Path
 
-PACKAGE_VERSION = "0.2.0"
+PACKAGE_VERSION = "0.2.1"
 MIN_CODEX = "0.34.0"
 MARKER_NAME = ".hextile-agent-marker"
 MCP_SECTION = "mcp_servers.hextile"
@@ -68,31 +68,32 @@ def write_agents_fragment() -> Path:
 
 def mcp_block(script: Path) -> str:
     # stdio only (OPEN-1). Absolute path so Codex does not depend on cwd.
+    command_s = json.dumps(sys.executable)
     script_s = json.dumps(str(script.resolve()))
     return (
         f"{BEGIN_MARK}\n"
         f"[{MCP_SECTION}]\n"
-        f'command = "python3"\n'
+        f"command = {command_s}\n"
         f"args = [{script_s}]\n"
         f"{END_MARK}\n"
     )
 
 
-def ensure_skills(codex_home: Path, dry_run: bool) -> Path:
-    dest_dir = codex_home / "skills" / "hextile"
-    dest_skill = dest_dir / "SKILL.md"
-    marker = dest_dir / MARKER_NAME
+def ensure_skills(home: Path, dry_run: bool) -> Path:
+    agents_root = home / ".agents" / "skills" / "hextile"
+    dest_skill = agents_root / "SKILL.md"
+    marker = agents_root / MARKER_NAME
     src = skill_source()
     if not src.is_file():
         raise SystemExit(f"Missing skill source: {src}")
     if dry_run:
         print(f"[dry-run] would write {dest_skill}")
         print(f"[dry-run] would write {marker}")
-        return dest_dir
-    dest_dir.mkdir(parents=True, exist_ok=True)
+        return agents_root
+    agents_root.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest_skill)
     src_refs = package_root() / "skills" / "hextile" / "references"
-    dest_refs = dest_dir / "references"
+    dest_refs = agents_root / "references"
     if src_refs.is_dir():
         if dest_refs.exists():
             shutil.rmtree(dest_refs)
@@ -104,7 +105,7 @@ def ensure_skills(codex_home: Path, dry_run: bool) -> Path:
     )
     print(f"Wrote {dest_skill}")
     print(f"Wrote {marker}")
-    return dest_dir
+    return agents_root
 
 
 def patch_config(config_path: Path, script: Path, dry_run: bool) -> None:
@@ -142,17 +143,18 @@ def _remove_hextile_section(text: str) -> str:
     return text
 
 
-def uninstall(codex_home: Path, dry_run: bool) -> None:
-    dest_dir = codex_home / "skills" / "hextile"
+def uninstall(home: Path, dry_run: bool) -> None:
+    agents_root = home / ".agents" / "skills" / "hextile"
+    codex_home = home / ".codex"
     config_path = codex_home / "config.toml"
-    if dest_dir.is_dir():
+    if agents_root.is_dir():
         if dry_run:
-            print(f"[dry-run] would remove {dest_dir}")
+            print(f"[dry-run] would remove {agents_root}")
         else:
-            shutil.rmtree(dest_dir)
-            print(f"Removed {dest_dir}")
+            shutil.rmtree(agents_root)
+            print(f"Removed {agents_root}")
     else:
-        print(f"No skills dir at {dest_dir}")
+        print(f"No skills dir at {agents_root}")
 
     if config_path.is_file():
         existing = config_path.read_text(encoding="utf-8")
@@ -192,7 +194,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     home = args.home if args.home is not None else Path(os.path.expanduser("~"))
-    codex_home = home / ".codex"
 
     print(
         f"hextile-agent Codex installer v{PACKAGE_VERSION} "
@@ -205,11 +206,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.uninstall:
-        uninstall(codex_home, args.dry_run)
+        uninstall(home, args.dry_run)
         return 0
 
-    ensure_skills(codex_home, args.dry_run)
-    patch_config(codex_home / "config.toml", script, args.dry_run)
+    ensure_skills(home, args.dry_run)
+    patch_config(home / ".codex" / "config.toml", script, args.dry_run)
     # Keep fragment in sync on install.
     if not args.dry_run:
         frag = write_agents_fragment()
