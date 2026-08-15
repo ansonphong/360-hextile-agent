@@ -281,6 +281,11 @@ class Client:
         rid = urllib.parse.quote(run_id, safe="")
         return self.get_json(f"/api/renders/{rid}")
 
+    def get_render_config(self, render_id: str) -> Any:
+        """GET /api/renders/{render_id}/config — parsed canonical JSON."""
+        rid = urllib.parse.quote(render_id, safe="")
+        return self.get_json(f"/api/renders/{rid}/config")
+
     def cancel_run(self, run_id: str) -> Any:
         """POST /api/renders/{run_id}/stop → cancelled."""
         rid = urllib.parse.quote(run_id, safe="")

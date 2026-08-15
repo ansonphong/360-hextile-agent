@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v1.1 tools (13): catalog + persist + run + monitor + seed + guides.
+v0.2.1 tools (14): catalog + persist + run + monitor + config + seed + guides.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from hextile_client import (  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.2.1"
 
 # Canonical tool names — drift tests assert SKILL.md ⊆ this list.
 TOOL_NAMES = (
@@ -41,6 +41,7 @@ TOOL_NAMES = (
     "run_workflow",
     "validate_config",
     "get_status",
+    "get_render_config",
     "list_runs",
     "cancel_run",
     "generate_seed",
@@ -56,6 +57,7 @@ _READ_ONLY = frozenset(
         "get_capabilities",
         "validate_config",
         "get_status",
+        "get_render_config",
         "list_runs",
         "list_360_loras",
         "get_guide",
@@ -230,6 +232,17 @@ TOOLS: list[dict[str, Any]] = [
         required=["run_id"],
     ),
     _tool_def(
+        "get_render_config",
+        "Read the producing .hextile.json for a render (GET /api/renders/{id}/config). Read-only.",
+        {
+            "render_id": {
+                "type": "string",
+                "description": "Render id whose producing config to read",
+            },
+        },
+        required=["render_id"],
+    ),
+    _tool_def(
         "list_runs",
         "List library renders (monitor without a stored run_id). "
         "Response data.renders[] includes status, progress, output_path.",
@@ -347,6 +360,7 @@ class HextileMcpServer:
             "run_workflow": self._run_workflow,
             "validate_config": self._validate_config,
             "get_status": self._get_status,
+            "get_render_config": self._get_render_config,
             "list_runs": self._list_runs,
             "cancel_run": self._cancel_run,
             "generate_seed": self._generate_seed,
@@ -487,6 +501,14 @@ class HextileMcpServer:
                 "run_id is required", status_code=None, kind="other"
             )
         return self.client.get_status(str(run_id))
+
+    def _get_render_config(self, args: dict[str, Any]) -> Any:
+        render_id = args.get("render_id")
+        if not render_id:
+            raise HextileClientError(
+                "render_id is required", status_code=None, kind="other"
+            )
+        return self.client.get_render_config(str(render_id))
 
     def _list_runs(self, args: dict[str, Any]) -> Any:
         return self.client.list_runs(
