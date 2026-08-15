@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import traceback
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
@@ -943,10 +945,14 @@ def _read_message(stdin) -> Optional[dict[str, Any]]:
     return json.loads(stripped)
 
 
+_WRITE_LOCK = threading.Lock()
+
+
 def _write_message(stdout, msg: dict[str, Any]) -> None:
     line = json.dumps(msg, separators=(",", ":"), ensure_ascii=False)
-    stdout.write(line + "\n")
-    stdout.flush()
+    with _WRITE_LOCK:
+        stdout.write(line + "\n")
+        stdout.flush()
 
 
 def main() -> int:
@@ -963,47 +969,93 @@ def main() -> int:
         pass
     server.notify = lambda msg: _write_message(stdout, msg)
 
-    while True:
+    # tools/call on one worker so generate_seed cannot starve ping.
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hextile-mcp")
+    pending_lock = threading.Lock()
+    pending: list[Future[Any]] = []
+    delivered: set[int] = set()
+    delivered_lock = threading.Lock()
+
+    def write_reply(fut: Future[Any], resp: Optional[dict[str, Any]]) -> None:
+        with delivered_lock:
+            key = id(fut)
+            if key in delivered:
+                return
+            delivered.add(key)
+        if resp is not None:
+            _write_message(stdout, resp)
+
+    def run_rpc(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
         try:
-            msg = _read_message(stdin)
-        except Exception as exc:  # noqa: BLE001
-            _write_message(
-                stdout,
-                {
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {
-                        "code": -32700,
-                        "message": f"Parse error: {exc}",
-                    },
-                },
-            )
-            continue
-        if msg is None:
-            break
-        if not isinstance(msg, dict):
-            continue
-        # Ignore bare responses.
-        if "method" not in msg:
-            continue
-        try:
-            resp = server.handle_rpc(msg)
+            return server.handle_rpc(msg)
         except Exception as exc:  # noqa: BLE001
             if "id" in msg:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg.get("id"),
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {exc}",
+                    },
+                }
+            return None
+
+    def on_done(fut: Future[Any]) -> None:
+        try:
+            resp = fut.result()
+        except Exception:
+            resp = None
+        write_reply(fut, resp)
+
+    def submit_tool(msg: dict[str, Any]) -> None:
+        fut = executor.submit(run_rpc, msg)
+        with pending_lock:
+            pending.append(fut)
+        fut.add_done_callback(on_done)
+
+    def join_inflight() -> None:
+        with pending_lock:
+            futs = list(pending)
+        for fut in futs:
+            try:
+                resp = fut.result()
+            except Exception:
+                resp = None
+            write_reply(fut, resp)
+
+    try:
+        while True:
+            try:
+                msg = _read_message(stdin)
+            except Exception as exc:  # noqa: BLE001
                 _write_message(
                     stdout,
                     {
                         "jsonrpc": "2.0",
-                        "id": msg.get("id"),
+                        "id": None,
                         "error": {
-                            "code": -32603,
-                            "message": f"Internal error: {exc}",
+                            "code": -32700,
+                            "message": f"Parse error: {exc}",
                         },
                     },
                 )
-            continue
-        if resp is not None:
-            _write_message(stdout, resp)
+                continue
+            if msg is None:
+                join_inflight()
+                break
+            if not isinstance(msg, dict):
+                continue
+            # Ignore bare responses.
+            if "method" not in msg:
+                continue
+            if msg.get("method") == "tools/call":
+                submit_tool(msg)
+                continue
+            resp = run_rpc(msg)
+            if resp is not None:
+                _write_message(stdout, resp)
+    finally:
+        executor.shutdown(wait=True)
     return 0
 
 
