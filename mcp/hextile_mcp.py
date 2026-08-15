@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v0.2.1 tools (14): catalog + persist + run + monitor + config + seed + guides.
+v0.2.1 tools (20): catalog + persist + run + monitor + config + seed + models + guides.
 """
 
 from __future__ import annotations
@@ -1012,6 +1012,11 @@ def main() -> int:
         except Exception:
             resp = None
         write_reply(fut, resp)
+        with pending_lock:
+            try:
+                pending.remove(fut)
+            except ValueError:
+                pass
 
     def submit_tool(msg: dict[str, Any]) -> None:
         fut = executor.submit(run_rpc, msg)
