@@ -51,6 +51,7 @@ TOOL_NAMES = (
     "get_seed_batch",
     "cancel_seed",
     "list_360_loras",
+    "list_installed_models",
     "get_guide",
 )
 
@@ -68,6 +69,7 @@ _READ_ONLY = frozenset(
         "list_seed_history",
         "get_seed_batch",
         "list_360_loras",
+        "list_installed_models",
         "get_guide",
     }
 )
@@ -394,6 +396,20 @@ TOOLS: list[dict[str, Any]] = [
         {},
     ),
     _tool_def(
+        "list_installed_models",
+        "List installed weights for a pipeline "
+        "(GET /api/models/{pipeline_id}?installed_only=true). "
+        "Omit pipeline_id for GET /api/models/catalog/status plus a note "
+        "to pass pipeline_id. Dry-run is Pydantic only — this tool is how "
+        "the agent sees installed weights.",
+        {
+            "pipeline_id": {
+                "type": "string",
+                "description": "Pipeline id (e.g. sdxl). Omit for catalog/status.",
+            },
+        },
+    ),
+    _tool_def(
         "get_guide",
         "Read bundled agent documentation (schema, best practices, "
         "website index, recipes). Pass name, or omit to list guides.",
@@ -473,6 +489,7 @@ class HextileMcpServer:
             "get_seed_batch": self._get_seed_batch,
             "cancel_seed": self._cancel_seed,
             "list_360_loras": self._list_360_loras,
+            "list_installed_models": self._list_installed_models,
             "get_guide": self._get_guide,
         }
 
@@ -703,6 +720,11 @@ class HextileMcpServer:
 
     def _list_360_loras(self, _args: dict[str, Any]) -> Any:
         return self.client.list_360_loras()
+
+    def _list_installed_models(self, args: dict[str, Any]) -> Any:
+        raw = args.get("pipeline_id")
+        pipeline_id = str(raw).strip() if raw else None
+        return self.client.list_installed_models(pipeline_id)
 
     def _get_guide(self, args: dict[str, Any]) -> Any:
         return load_guide(str(args.get("name") or "index"))

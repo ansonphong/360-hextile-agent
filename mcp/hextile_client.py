@@ -357,6 +357,25 @@ class Client:
         """GET /api/360-lora/loras — catalog for generate_seed path + base_model."""
         return self.get_json("/api/360-lora/loras")
 
+    # ── models ──────────────────────────────────────────────────────────
+
+    def list_installed_models(self, pipeline_id: Optional[str] = None) -> Any:
+        """GET /api/models/{pipeline_id}?installed_only=true, or catalog/status."""
+        pid = str(pipeline_id).strip() if pipeline_id else ""
+        if pid:
+            quoted = urllib.parse.quote(pid, safe="")
+            return self.get_json(
+                f"/api/models/{quoted}",
+                params={"installed_only": "true"},
+            )
+        status = self.get_json("/api/models/catalog/status")
+        note = "Pass pipeline_id to list installed weights for that pipeline."
+        if isinstance(status, dict):
+            out = dict(status)
+            out["note"] = note
+            return out
+        return {"catalog_status": status, "note": note}
+
     # ── handshake (OPEN-3) ──────────────────────────────────────────────
 
     def probe(self) -> dict[str, Any]:

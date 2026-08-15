@@ -44,6 +44,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `save_workflow` | Persist a **new** id on user/project | **yes** |
 | `delete_workflow` | Remove a user/project workflow | **yes** |
 | `validate_config` | Dry-run merge+validate (terraform plan) | no |
+| `list_installed_models` | Installed weights — dry-run is Pydantic only | no |
 | `run_workflow` | Queue a render after overrides | **yes** |
 | `get_status` | Poll `run_id` progress / output paths | no |
 | `get_render_config` | Read producing .hextile.json for a render | no |
