@@ -42,6 +42,7 @@ TOOL_NAMES = (
     "validate_config",
     "get_status",
     "get_render_config",
+    "get_logs",
     "list_runs",
     "cancel_run",
     "generate_seed",
@@ -58,6 +59,7 @@ _READ_ONLY = frozenset(
         "validate_config",
         "get_status",
         "get_render_config",
+        "get_logs",
         "list_runs",
         "list_360_loras",
         "get_guide",
@@ -243,6 +245,17 @@ TOOLS: list[dict[str, Any]] = [
         required=["render_id"],
     ),
     _tool_def(
+        "get_logs",
+        "Fetch failed-run logs (GET /api/renders/{id}/logs). Read-only.",
+        {
+            "run_id": {
+                "type": "string",
+                "description": "Render id whose logs to read",
+            },
+        },
+        required=["run_id"],
+    ),
+    _tool_def(
         "list_runs",
         "List library renders (monitor without a stored run_id). "
         "Response data.renders[] includes status, progress, output_path.",
@@ -361,6 +374,7 @@ class HextileMcpServer:
             "validate_config": self._validate_config,
             "get_status": self._get_status,
             "get_render_config": self._get_render_config,
+            "get_logs": self._get_logs,
             "list_runs": self._list_runs,
             "cancel_run": self._cancel_run,
             "generate_seed": self._generate_seed,
@@ -509,6 +523,14 @@ class HextileMcpServer:
                 "render_id is required", status_code=None, kind="other"
             )
         return self.client.get_render_config(str(render_id))
+
+    def _get_logs(self, args: dict[str, Any]) -> Any:
+        run_id = args.get("run_id")
+        if not run_id:
+            raise HextileClientError(
+                "run_id is required", status_code=None, kind="other"
+            )
+        return self.client.get_logs(str(run_id))
 
     def _list_runs(self, args: dict[str, Any]) -> Any:
         return self.client.list_runs(
