@@ -1,10 +1,11 @@
-# hextile-agent
+# 360-hextile-agent
 
 **v0.2.1**
 
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
-Marketplace host: **`ansonphong/hextile-agent`**
+Primary marketplace: **`ansonphong/360-hextile-plugins`** — the shared 360 Hextile catalog. Install id **`hextile@360-hextile`**. The studio-matte plugin `hextile-pipe` ships from the same catalog.
+Standalone marketplace (footnote): **`ansonphong/360-hextile-agent`** — this repo on its own, install id **`hextile@hextile-agent`**.
 
 The MCP process is a thin **stdio** JSON-RPC ↔ HTTP proxy (`python3`, stdlib only).  
 All merge, validation, and render logic stay in the running app at `http://127.0.0.1:8000`.
@@ -20,10 +21,17 @@ All merge, validation, and render logic stay in the running app at `http://127.0
 
 ## Install — Claude Code
 
-Public marketplace (this repo):
+Primary — the 360 Hextile catalog (ships this plugin **and** `hextile-pipe`):
 
 ```bash
-/plugin marketplace add ansonphong/hextile-agent
+/plugin marketplace add ansonphong/360-hextile-plugins
+/plugin install hextile@360-hextile
+```
+
+Standalone — this repo as its own marketplace:
+
+```bash
+/plugin marketplace add ansonphong/360-hextile-agent
 /plugin install hextile@hextile-agent
 ```
 
@@ -43,22 +51,33 @@ Confirm tools appear (`list_workflows`, `get_guide`, …). With the app down, to
 
 ## Install — Grok
 
-Public marketplace (this repo):
+Primary — the 360 Hextile catalog:
 
 ```bash
-grok plugin marketplace add ansonphong/hextile-agent
-grok plugin install ansonphong/hextile-agent --trust
+grok plugin marketplace add ansonphong/360-hextile-plugins
+grok plugin install hextile --trust
+```
+
+Standalone — this repo as its own marketplace:
+
+```bash
+grok plugin marketplace add ansonphong/360-hextile-agent
+grok plugin install hextile --trust
 ```
 
 Enable `hextile` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
 
-A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install /path/to/hextile-agent --trust`.
+A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install hextile --trust`.
 
 ## Install — Codex
 
+From the 360 Hextile catalog (`ansonphong/360-hextile-plugins`): `codex plugin marketplace add <path-or-github>` then `codex plugin add hextile@360-hextile`.
+
+Standalone — clone this repo and run the installer:
+
 ```bash
-git clone https://github.com/ansonphong/hextile-agent.git
-cd hextile-agent
+git clone https://github.com/ansonphong/360-hextile-agent.git
+cd 360-hextile-agent
 python3 codex/install.py
 ```
 
