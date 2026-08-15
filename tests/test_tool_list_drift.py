@@ -57,6 +57,7 @@ EXPECTED_TOOLS = (
     "run_workflow",
     "validate_config",
     "get_status",
+    "get_render_config",
     "list_runs",
     "cancel_run",
     "generate_seed",

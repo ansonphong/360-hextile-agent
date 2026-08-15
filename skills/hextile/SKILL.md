@@ -46,6 +46,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `validate_config` | Dry-run merge+validate (terraform plan) | no |
 | `run_workflow` | Queue a render after overrides | **yes** |
 | `get_status` | Poll `run_id` progress / output paths | no |
+| `get_render_config` | Read producing .hextile.json for a render | no |
 | `list_runs` | Find jobs if you lost `run_id` | no |
 | `cancel_run` | Kill a long GPU run | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |
