@@ -55,6 +55,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `generate_seed` | Create equirect seed image via 360-LoRA | **yes** |
 | `list_seed_history` | Recover seed batches after the 300s generate_seed timeout | no |
 | `get_seed_batch` | Recover one seed batch after the 300s generate_seed timeout | no |
+| `cancel_seed` | Stop the live 360-LoRA job, not a render | **yes** |
 
 ### Selection guide
 

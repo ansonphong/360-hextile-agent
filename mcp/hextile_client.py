@@ -349,6 +349,10 @@ class Client:
         bid = urllib.parse.quote(batch_id, safe="")
         return self.get_json(f"/api/360-lora/history/{bid}")
 
+    def cancel_seed(self) -> Any:
+        """POST /api/360-lora/cancel — stop the live 360-LoRA job (not a render)."""
+        return self.post_json("/api/360-lora/cancel")
+
     def list_360_loras(self) -> Any:
         """GET /api/360-lora/loras — catalog for generate_seed path + base_model."""
         return self.get_json("/api/360-lora/loras")

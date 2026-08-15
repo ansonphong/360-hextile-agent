@@ -49,6 +49,7 @@ TOOL_NAMES = (
     "generate_seed",
     "list_seed_history",
     "get_seed_batch",
+    "cancel_seed",
     "list_360_loras",
     "get_guide",
 )
@@ -78,6 +79,7 @@ _MUTATING = frozenset(
         "generate_seed",
         "cancel_run",
         "retry_run",
+        "cancel_seed",
     }
 )
 
@@ -93,7 +95,7 @@ _GUIDE_ROOT = Path(__file__).resolve().parent.parent / "skills" / "hextile" / "r
 def _annotations(name: str) -> dict[str, bool]:
     if name in _READ_ONLY:
         return {"readOnlyHint": True, "destructiveHint": False}
-    if name in {"cancel_run", "delete_workflow"}:
+    if name in {"cancel_run", "cancel_seed", "delete_workflow"}:
         return {"readOnlyHint": False, "destructiveHint": True}
     return {"readOnlyHint": False, "destructiveHint": False}
 
@@ -349,6 +351,12 @@ TOOLS: list[dict[str, Any]] = [
         required=["batch_id"],
     ),
     _tool_def(
+        "cancel_seed",
+        "Stop the live 360-LoRA job (POST /api/360-lora/cancel). "
+        "Not a render — use cancel_run for renders.",
+        {},
+    ),
+    _tool_def(
         "list_360_loras",
         "List installed/known 360-LoRAs. Use path + base_model on generate_seed.",
         {},
@@ -431,6 +439,7 @@ class HextileMcpServer:
             "generate_seed": self._generate_seed,
             "list_seed_history": self._list_seed_history,
             "get_seed_batch": self._get_seed_batch,
+            "cancel_seed": self._cancel_seed,
             "list_360_loras": self._list_360_loras,
             "get_guide": self._get_guide,
         }
@@ -656,6 +665,9 @@ class HextileMcpServer:
                 "batch_id is required", status_code=None, kind="other"
             )
         return self.client.get_seed_batch(str(batch_id))
+
+    def _cancel_seed(self, _args: dict[str, Any]) -> Any:
+        return self.client.cancel_seed()
 
     def _list_360_loras(self, _args: dict[str, Any]) -> Any:
         return self.client.list_360_loras()
