@@ -143,18 +143,30 @@ def _remove_hextile_section(text: str) -> str:
     return text
 
 
+def _rmtree(path: Path, dry_run: bool) -> None:
+    if dry_run:
+        print(f"[dry-run] would remove {path}")
+        return
+    shutil.rmtree(path)
+    print(f"Removed {path}")
+
+
 def uninstall(home: Path, dry_run: bool) -> None:
     agents_root = home / ".agents" / "skills" / "hextile"
     codex_home = home / ".codex"
     config_path = codex_home / "config.toml"
     if agents_root.is_dir():
-        if dry_run:
-            print(f"[dry-run] would remove {agents_root}")
-        else:
-            shutil.rmtree(agents_root)
-            print(f"Removed {agents_root}")
+        _rmtree(agents_root, dry_run)
     else:
         print(f"No skills dir at {agents_root}")
+
+    # Marker-owned leftover from pre-0.2.1 (~/.codex/skills/hextile). Never
+    # delete an unmarked tree or sibling files.
+    legacy_dir = codex_home / "skills" / "hextile"
+    if legacy_dir.is_dir() and (legacy_dir / MARKER_NAME).is_file():
+        _rmtree(legacy_dir, dry_run)
+    elif legacy_dir.is_dir():
+        print(f"Leaving unmarked {legacy_dir}")
 
     if config_path.is_file():
         existing = config_path.read_text(encoding="utf-8")
