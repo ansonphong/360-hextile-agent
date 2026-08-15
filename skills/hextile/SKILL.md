@@ -50,6 +50,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_logs` | Fetch failed-run logs | no |
 | `list_runs` | Find jobs if you lost `run_id` | no |
 | `cancel_run` | Kill a long GPU run | **yes** |
+| `retry_run` | Retry a crashed/failed run (APP returns 400 otherwise); uses APP tile-reuse policy | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |
 | `generate_seed` | Create equirect seed image via 360-LoRA | **yes** |
 

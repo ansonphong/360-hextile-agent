@@ -296,6 +296,11 @@ class Client:
         rid = urllib.parse.quote(run_id, safe="")
         return self.post_json(f"/api/renders/{rid}/stop")
 
+    def retry_run(self, run_id: str) -> Any:
+        """POST /api/renders/{run_id}/retry — APP tile-reuse on crashed/failed."""
+        rid = urllib.parse.quote(run_id, safe="")
+        return self.post_json(f"/api/renders/{rid}/retry")
+
     def list_runs(self, lifecycle_status: str = "active") -> Any:
         """GET /api/renders/?lifecycle_status= (default active)."""
         status = lifecycle_status or "active"

@@ -45,6 +45,7 @@ TOOL_NAMES = (
     "get_logs",
     "list_runs",
     "cancel_run",
+    "retry_run",
     "generate_seed",
     "list_360_loras",
     "get_guide",
@@ -72,6 +73,7 @@ _MUTATING = frozenset(
         "run_workflow",
         "generate_seed",
         "cancel_run",
+        "retry_run",
     }
 )
 
@@ -276,6 +278,15 @@ TOOLS: list[dict[str, Any]] = [
         required=["run_id"],
     ),
     _tool_def(
+        "retry_run",
+        "Retry a crashed/failed render (POST /api/renders/{id}/retry). "
+        "APP returns 400 otherwise. Uses APP tile-reuse policy.",
+        {
+            "run_id": {"type": "string", "description": "Render id to retry"},
+        },
+        required=["run_id"],
+    ),
+    _tool_def(
         "generate_seed",
         "Generate 360-LoRA equirect seed image(s). Returns variation paths. "
         "Two-step: pick a path, then run_workflow with overrides "
@@ -377,6 +388,7 @@ class HextileMcpServer:
             "get_logs": self._get_logs,
             "list_runs": self._list_runs,
             "cancel_run": self._cancel_run,
+            "retry_run": self._retry_run,
             "generate_seed": self._generate_seed,
             "list_360_loras": self._list_360_loras,
             "get_guide": self._get_guide,
@@ -544,6 +556,14 @@ class HextileMcpServer:
                 "run_id is required", status_code=None, kind="other"
             )
         return self.client.cancel_run(str(run_id))
+
+    def _retry_run(self, args: dict[str, Any]) -> Any:
+        run_id = args.get("run_id")
+        if not run_id:
+            raise HextileClientError(
+                "run_id is required", status_code=None, kind="other"
+            )
+        return self.client.retry_run(str(run_id))
 
     def _generate_seed(self, args: dict[str, Any]) -> Any:
         prompt = args.get("prompt")
