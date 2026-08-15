@@ -979,15 +979,12 @@ def main() -> int:
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hextile-mcp")
     pending_lock = threading.Lock()
     pending: list[Future[Any]] = []
-    delivered: set[int] = set()
-    delivered_lock = threading.Lock()
 
     def write_reply(fut: Future[Any], resp: Optional[dict[str, Any]]) -> None:
-        with delivered_lock:
-            key = id(fut)
-            if key in delivered:
-                return
-            delivered.add(key)
+        # Mark the Future itself — never id(fut), which CPython reuses.
+        if getattr(fut, "_hextile_written", False):
+            return
+        setattr(fut, "_hextile_written", True)
         if resp is not None:
             _write_message(stdout, resp)
 
@@ -1032,6 +1029,7 @@ def main() -> int:
                 resp = fut.result()
             except Exception:
                 resp = None
+            # Backup write if the done-callback has not run yet.
             write_reply(fut, resp)
 
     try:
