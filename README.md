@@ -61,9 +61,9 @@ python3 codex/install.py
 
 This writes:
 
-- `~/.codex/skills/hextile/SKILL.md` + `references/`
+- `~/.agents/skills/hextile/SKILL.md` + `references/`
 - `[mcp_servers.hextile]` **stdio** entry in `~/.codex/config.toml`  
-  (`command = "python3"`, `args = ["…/mcp/hextile_mcp.py"]`)
+  (`command` is the absolute `sys.executable`, `args = ["…/mcp/hextile_mcp.py"]`)
 
 Uninstall:
 
@@ -141,8 +141,9 @@ python3 -m py_compile mcp/hextile_client.py mcp/hextile_mcp.py codex/install.py
 python3 -m pytest tests/test_tool_list_drift.py -q
 
 # Codex installer smoke (temp HOME)
-HOME=/tmp/hextile-agent-codex-test python3 codex/install.py
-HOME=/tmp/hextile-agent-codex-test python3 codex/install.py --uninstall
+python3 -m pytest tests/test_codex_skill_discovery.py -q
+python3 codex/install.py --home /tmp/hextile-agent-codex-test
+python3 codex/install.py --uninstall --home /tmp/hextile-agent-codex-test
 ```
 
 ## Docs
