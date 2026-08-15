@@ -1,5 +1,7 @@
 # hextile-agent
 
+**v0.2.1**
+
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
 Marketplace host: **`ansonphong/hextile-agent`**
@@ -73,7 +75,7 @@ Restart Codex and run `/mcp` — you should see `hextile`.
 
 Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
 
-## Tools (13)
+## Tools (14)
 
 | Tool | HTTP / source |
 |------|----------------|
@@ -85,6 +87,7 @@ Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-sta
 | `run_workflow` | `POST /api/workflows/run` |
 | `validate_config` | same, `dry_run: true` |
 | `get_status` | `GET /api/renders/{id}` |
+| `get_render_config` | `GET /api/renders/{id}/config` |
 | `list_runs` | `GET /api/renders/` |
 | `cancel_run` | `POST /api/renders/{id}/stop` |
 | `generate_seed` | `POST /api/360-lora/generate` |
