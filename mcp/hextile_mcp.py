@@ -47,6 +47,8 @@ TOOL_NAMES = (
     "cancel_run",
     "retry_run",
     "generate_seed",
+    "list_seed_history",
+    "get_seed_batch",
     "list_360_loras",
     "get_guide",
 )
@@ -62,6 +64,8 @@ _READ_ONLY = frozenset(
         "get_render_config",
         "get_logs",
         "list_runs",
+        "list_seed_history",
+        "get_seed_batch",
         "list_360_loras",
         "get_guide",
     }
@@ -310,6 +314,41 @@ TOOLS: list[dict[str, Any]] = [
         required=["prompt", "lora_path", "base_model"],
     ),
     _tool_def(
+        "list_seed_history",
+        "List 360-LoRA seed batches (GET /api/360-lora/history). "
+        "Recover variation paths after the 300s generate_seed timeout. "
+        "Always sends offset+limit so APP returns {batches, total}.",
+        {
+            "offset": {
+                "type": "integer",
+                "description": "Pagination offset",
+                "default": 0,
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Page size (1–100)",
+                "default": 50,
+            },
+            "status": {
+                "type": "string",
+                "description": "active | archived | trashed",
+                "default": "active",
+            },
+        },
+    ),
+    _tool_def(
+        "get_seed_batch",
+        "Read one 360-LoRA seed batch (GET /api/360-lora/history/{batch_id}). "
+        "Recover after the 300s generate_seed timeout.",
+        {
+            "batch_id": {
+                "type": "string",
+                "description": "Batch id from generate_seed or list_seed_history",
+            },
+        },
+        required=["batch_id"],
+    ),
+    _tool_def(
         "list_360_loras",
         "List installed/known 360-LoRAs. Use path + base_model on generate_seed.",
         {},
@@ -390,6 +429,8 @@ class HextileMcpServer:
             "cancel_run": self._cancel_run,
             "retry_run": self._retry_run,
             "generate_seed": self._generate_seed,
+            "list_seed_history": self._list_seed_history,
+            "get_seed_batch": self._get_seed_batch,
             "list_360_loras": self._list_360_loras,
             "get_guide": self._get_guide,
         }
@@ -597,6 +638,24 @@ class HextileMcpServer:
             n=n,
             **extra,
         )
+
+    def _list_seed_history(self, args: dict[str, Any]) -> Any:
+        offset = 0 if args.get("offset") is None else int(args["offset"])
+        limit = 50 if args.get("limit") is None else int(args["limit"])
+        status = args.get("status")
+        return self.client.list_seed_history(
+            offset=offset,
+            limit=limit,
+            status=str(status) if status else None,
+        )
+
+    def _get_seed_batch(self, args: dict[str, Any]) -> Any:
+        batch_id = args.get("batch_id")
+        if not batch_id:
+            raise HextileClientError(
+                "batch_id is required", status_code=None, kind="other"
+            )
+        return self.client.get_seed_batch(str(batch_id))
 
     def _list_360_loras(self, _args: dict[str, Any]) -> Any:
         return self.client.list_360_loras()

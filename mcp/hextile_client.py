@@ -332,6 +332,23 @@ class Client:
             "/api/360-lora/generate", body, timeout=GENERATE_TIMEOUT_S
         )
 
+    def list_seed_history(
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> Any:
+        """GET /api/360-lora/history — always send offset+limit for {batches, total}."""
+        params: dict[str, Any] = {"offset": int(offset), "limit": int(limit)}
+        if status:
+            params["status"] = status
+        return self.get_json("/api/360-lora/history", params=params)
+
+    def get_seed_batch(self, batch_id: str) -> Any:
+        """GET /api/360-lora/history/{batch_id}."""
+        bid = urllib.parse.quote(batch_id, safe="")
+        return self.get_json(f"/api/360-lora/history/{bid}")
+
     def list_360_loras(self) -> Any:
         """GET /api/360-lora/loras — catalog for generate_seed path + base_model."""
         return self.get_json("/api/360-lora/loras")

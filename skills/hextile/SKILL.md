@@ -53,6 +53,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `retry_run` | Retry a crashed/failed run (APP returns 400 otherwise); uses APP tile-reuse policy | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |
 | `generate_seed` | Create equirect seed image via 360-LoRA | **yes** |
+| `list_seed_history` | Recover seed batches after the 300s generate_seed timeout | no |
+| `get_seed_batch` | Recover one seed batch after the 300s generate_seed timeout | no |
 
 ### Selection guide
 
