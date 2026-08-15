@@ -71,6 +71,7 @@ class Client:
         *,
         timeout: Optional[float] = None,
         params: Optional[Mapping[str, Any]] = None,
+        headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
         """HTTP JSON request. Raises HextileClientError on failure."""
         url = self._url(path)
@@ -81,11 +82,15 @@ class Client:
             if qs:
                 url = url + ("&" if "?" in url else "?") + qs
         data: Optional[bytes] = None
-        headers = {"Accept": "application/json"}
+        req_headers = {"Accept": "application/json"}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            req_headers["Content-Type"] = "application/json"
+        if headers:
+            req_headers.update(dict(headers))
+        req = urllib.request.Request(
+            url, data=data, headers=req_headers, method=method
+        )
         to = self.timeout if timeout is None else timeout
         try:
             if self._opener is not None:
@@ -161,9 +166,10 @@ class Client:
         *,
         timeout: Optional[float] = None,
         params: Optional[Mapping[str, Any]] = None,
+        headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
         return self.request_json(
-            "POST", path, body, timeout=timeout, params=params
+            "POST", path, body, timeout=timeout, params=params, headers=headers
         )
 
     def delete_json(
@@ -273,7 +279,11 @@ class Client:
             body["overrides"] = overrides
         if output is not None:
             body["output"] = output
-        return self.post_json("/api/workflows/run", body)
+        return self.post_json(
+            "/api/workflows/run",
+            body,
+            headers={"X-Hextile-Agent": "mcp"},
+        )
 
     def dry_run_workflow(self, **kwargs: Any) -> Any:
         """POST /api/workflows/run with dry_run=true."""
