@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+import uuid
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 # Allow `python3 mcp/hextile_mcp.py` from package root or elsewhere.
 _HERE = Path(__file__).resolve().parent
@@ -30,6 +31,7 @@ from hextile_client import (  # noqa: E402
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
 SERVER_VERSION = "0.2.1"
+ACTIVITY_SCHEMA = "hextile.agent.activity.v1"
 
 # Canonical tool names — drift tests assert SKILL.md ⊆ this list.
 TOOL_NAMES = (
@@ -457,6 +459,35 @@ def load_guide(name: str) -> dict[str, Any]:
     }
 
 
+def _overrides_keys(name: str, args: Mapping[str, Any]) -> Optional[list[str]]:
+    """Names only of args.overrides for validate_config / run_workflow."""
+    if name not in ("validate_config", "run_workflow"):
+        return None
+    overrides = args.get("overrides")
+    if not isinstance(overrides, Mapping):
+        return None
+    return [str(k) for k in overrides.keys()]
+
+
+def _run_from_payload(payload: Any) -> Optional[dict[str, Any]]:
+    """Pull run.run_id/status from a handler payload when present."""
+    if not isinstance(payload, Mapping):
+        return None
+    candidates: list[Mapping[str, Any]] = [payload]
+    inner = payload.get("data")
+    if isinstance(inner, Mapping):
+        candidates.append(inner)
+    for src in candidates:
+        run_id = src.get("run_id")
+        if run_id is None:
+            continue
+        run: dict[str, Any] = {"run_id": str(run_id)}
+        if src.get("status") is not None:
+            run["status"] = str(src["status"])
+        return run
+    return None
+
+
 def _ok_result(data: Any) -> dict[str, Any]:
     text = data if isinstance(data, str) else json.dumps(data, indent=2, default=str)
     return {"content": [{"type": "text", "text": text}], "isError": False}
@@ -475,6 +506,7 @@ class HextileMcpServer:
     ) -> None:
         self.client = client or Client()
         self.notify = notify
+        self.session_id: Optional[str] = None
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "list_workflows": self._list_workflows,
             "get_workflow": self._get_workflow,
@@ -508,6 +540,7 @@ class HextileMcpServer:
         is_notification = "id" not in msg
 
         if method == "initialize":
+            self._ensure_session_id()
             return self._response(
                 msg_id,
                 {
@@ -567,19 +600,71 @@ class HextileMcpServer:
         arguments: dict[str, Any],
         progress_token: Any = None,
     ) -> dict[str, Any]:
+        call_id = str(uuid.uuid4())
+        args = arguments if isinstance(arguments, dict) else {}
+        overrides_keys = _overrides_keys(name, args)
+        self._emit_activity(
+            tool=name, call_id=call_id, phase="started",
+            overrides_keys=overrides_keys,
+        )
         handler = self._handlers.get(name)
         if handler is None:
+            self._emit_activity(
+                tool=name,
+                call_id=call_id,
+                phase="failed",
+                error={
+                    "kind": "other",
+                    "status_code": None,
+                    "message": f"Unknown tool: {name}",
+                },
+                overrides_keys=overrides_keys,
+            )
             return _err_result(
                 {"ok": False, "error": f"Unknown tool: {name}", "kind": "other"}
             )
         try:
             if name == "generate_seed":
                 self._notify_progress(progress_token, 0)
-            data = handler(arguments if isinstance(arguments, dict) else {})
+            data = handler(args)
+            phase = (
+                "cancelled"
+                if name in ("cancel_run", "cancel_seed")
+                else "succeeded"
+            )
+            self._emit_activity(
+                tool=name,
+                call_id=call_id,
+                phase=phase,
+                run=_run_from_payload(data),
+                overrides_keys=overrides_keys,
+            )
             return _ok_result(data)
         except HextileClientError as exc:
+            self._emit_activity(
+                tool=name,
+                call_id=call_id,
+                phase="failed",
+                error={
+                    "kind": exc.kind,
+                    "status_code": exc.status_code,
+                    "message": str(exc),
+                },
+                overrides_keys=overrides_keys,
+            )
             return _err_result(error_payload(exc))
         except Exception as exc:  # noqa: BLE001
+            self._emit_activity(
+                tool=name,
+                call_id=call_id,
+                phase="failed",
+                error={
+                    "kind": "other",
+                    "status_code": None,
+                    "message": str(exc),
+                },
+                overrides_keys=overrides_keys,
+            )
             return _err_result(
                 {
                     "ok": False,
@@ -588,6 +673,50 @@ class HextileMcpServer:
                     "trace": traceback.format_exc()[-500:],
                 }
             )
+
+    def _ensure_session_id(self) -> str:
+        if not self.session_id:
+            self.session_id = str(uuid.uuid4())
+        return self.session_id
+
+    def _emit_activity(
+        self,
+        *,
+        tool: str,
+        call_id: str,
+        phase: str,
+        run: Optional[Mapping[str, Any]] = None,
+        error: Optional[Mapping[str, Any]] = None,
+        overrides_keys: Optional[list[str]] = None,
+    ) -> None:
+        # ids/phase only — never config/nav/tool_op/args. Timeout 1s; swallow.
+        envelope: dict[str, Any] = {
+            "schema": ACTIVITY_SCHEMA,
+            "session_id": self._ensure_session_id(),
+            "call_id": call_id,
+            "tool": tool,
+            "phase": phase,
+        }
+        if run:
+            run_body: dict[str, Any] = {}
+            if run.get("run_id") is not None:
+                run_body["run_id"] = str(run["run_id"])
+            if run.get("status") is not None:
+                run_body["status"] = str(run["status"])
+            if run_body:
+                envelope["run"] = run_body
+        if error:
+            envelope["error"] = {
+                "kind": error.get("kind", "other"),
+                "status_code": error.get("status_code"),
+                "message": error.get("message", ""),
+            }
+        if overrides_keys is not None:
+            envelope["overrides_keys"] = list(overrides_keys)
+        try:
+            self.client.post_activity(envelope)
+        except Exception:
+            pass
 
     def _notify_progress(
         self,

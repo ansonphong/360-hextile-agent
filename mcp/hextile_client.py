@@ -174,6 +174,12 @@ class Client:
     ) -> Any:
         return self.request_json("DELETE", path, timeout=timeout)
 
+    def post_activity(self, envelope: Mapping[str, Any]) -> Any:
+        """POST /api/agent/events — 1s timeout. Caller swallows errors."""
+        return self.request_json(
+            "POST", "/api/agent/events", envelope, timeout=1
+        )
+
     # ── workflows ───────────────────────────────────────────────────────
 
     def list_workflows(self) -> Any:
