@@ -468,8 +468,13 @@ def _err_result(payload: Any) -> dict[str, Any]:
 
 
 class HextileMcpServer:
-    def __init__(self, client: Optional[Client] = None) -> None:
+    def __init__(
+        self,
+        client: Optional[Client] = None,
+        notify: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> None:
         self.client = client or Client()
+        self.notify = notify
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "list_workflows": self._list_workflows,
             "get_workflow": self._get_workflow,
@@ -512,6 +517,10 @@ class HextileMcpServer:
                         "name": SERVER_NAME,
                         "version": SERVER_VERSION,
                     },
+                    "instructions": (
+                        "Call get_guide before compose; "
+                        "validate_config before run_workflow."
+                    ),
                 },
             )
 
@@ -527,8 +536,12 @@ class HextileMcpServer:
         if method == "tools/call":
             name = params.get("name") or ""
             arguments = params.get("arguments") or {}
+            meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+            progress_token = meta.get("progressToken")
             try:
-                result = self.call_tool(name, arguments)
+                result = self.call_tool(
+                    name, arguments, progress_token=progress_token
+                )
             except Exception as exc:  # noqa: BLE001 — surface to agent
                 return self._response(
                     msg_id,
@@ -548,13 +561,20 @@ class HextileMcpServer:
             },
         }
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        progress_token: Any = None,
+    ) -> dict[str, Any]:
         handler = self._handlers.get(name)
         if handler is None:
             return _err_result(
                 {"ok": False, "error": f"Unknown tool: {name}", "kind": "other"}
             )
         try:
+            if name == "generate_seed":
+                self._notify_progress(progress_token, 0)
             data = handler(arguments if isinstance(arguments, dict) else {})
             return _ok_result(data)
         except HextileClientError as exc:
@@ -568,6 +588,31 @@ class HextileMcpServer:
                     "trace": traceback.format_exc()[-500:],
                 }
             )
+
+    def _notify_progress(
+        self,
+        progress_token: Any,
+        progress: float,
+        message: Optional[str] = None,
+    ) -> None:
+        if progress_token is None or self.notify is None:
+            return
+        params: dict[str, Any] = {
+            "progressToken": progress_token,
+            "progress": progress,
+        }
+        if message is not None:
+            params["message"] = message
+        try:
+            self.notify(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/progress",
+                    "params": params,
+                }
+            )
+        except Exception:
+            pass
 
     # ── tool handlers ───────────────────────────────────────────────────
 
@@ -787,6 +832,7 @@ def main() -> int:
         stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     except Exception:
         pass
+    server.notify = lambda msg: _write_message(stdout, msg)
 
     while True:
         try:
