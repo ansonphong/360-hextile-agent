@@ -708,10 +708,16 @@ class HextileMcpServer:
             if run_body:
                 envelope["run"] = run_body
         if error:
+            status = error.get("status_code")
+            # Body snippets echo config/override/prompt values — never on the bus.
             envelope["error"] = {
                 "kind": error.get("kind", "other"),
-                "status_code": error.get("status_code"),
-                "message": error.get("message", ""),
+                "status_code": status,
+                "message": (
+                    f"HTTP {status}"
+                    if status is not None
+                    else str(error.get("kind") or "other")
+                ),
             }
         if overrides_keys is not None:
             envelope["overrides_keys"] = list(overrides_keys)
