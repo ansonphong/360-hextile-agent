@@ -980,11 +980,14 @@ def main() -> int:
     pending_lock = threading.Lock()
     pending: list[Future[Any]] = []
 
+    reply_mark = threading.Lock()
+
     def write_reply(fut: Future[Any], resp: Optional[dict[str, Any]]) -> None:
         # Mark the Future itself — never id(fut), which CPython reuses.
-        if getattr(fut, "_hextile_written", False):
-            return
-        setattr(fut, "_hextile_written", True)
+        with reply_mark:
+            if getattr(fut, "_hextile_written", False):
+                return
+            setattr(fut, "_hextile_written", True)
         if resp is not None:
             _write_message(stdout, resp)
 
