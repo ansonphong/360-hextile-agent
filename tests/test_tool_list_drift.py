@@ -63,6 +63,9 @@ EXPECTED_TOOLS = (
     "cancel_run",
     "retry_run",
     "generate_seed",
+    "list_seed_history",
+    "get_seed_batch",
+    "cancel_seed",
     "list_360_loras",
     "get_guide",
 )

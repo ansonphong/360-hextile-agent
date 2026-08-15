@@ -305,12 +305,44 @@ TOOLS: list[dict[str, Any]] = [
             },
             "base_model": {
                 "type": "string",
-                "description": "sdxl | sd15 | flux_schnell",
+                "description": "sdxl | sd15 | flux_schnell | qwen_image",
             },
             "n": {
                 "type": "integer",
                 "description": "Number of variations (1–8)",
                 "default": 4,
+            },
+            "trigger_word": {
+                "type": "string",
+                "description": "Optional LoRA trigger word",
+            },
+            "width": {
+                "type": "integer",
+                "description": "Output width (APP default 1600)",
+            },
+            "height": {
+                "type": "integer",
+                "description": "Output height (APP default 800)",
+            },
+            "seed": {
+                "type": "integer",
+                "description": "Generation seed (−1 = random)",
+            },
+            "num_inference_steps": {
+                "type": "integer",
+                "description": "Inference steps (1–100)",
+            },
+            "guidance_scale": {
+                "type": "number",
+                "description": "CFG / guidance scale",
+            },
+            "negative_prompt": {
+                "type": "string",
+                "description": "Negative prompt",
+            },
+            "seamless_x": {
+                "type": "boolean",
+                "description": "Circular X-padding for horizontal seam",
             },
         },
         required=["prompt", "lora_path", "base_model"],

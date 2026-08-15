@@ -81,7 +81,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 
 `InputSource` is `file` | `render` only. Generative producers are **not** render-time sources.
 
-1. `list_360_loras` → pick `path` and `base_model` (`sdxl` | `sd15` | `flux_schnell`).
+1. `list_360_loras` → pick `path` and `base_model` (`sdxl` | `sd15` | `flux_schnell` | `qwen_image`).
 2. `generate_seed(prompt, lora_path, base_model, n?)` → `variations` (absolute paths) + `batch_id`.
 3. Pick one path (default index 0 unless the user chooses).
 4. `run_workflow` with overrides:
