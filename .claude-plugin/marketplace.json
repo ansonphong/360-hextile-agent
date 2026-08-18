@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "hextile",
+      "name": "hextile-agent",
       "source": "./",
       "category": "productivity",
       "homepage": "https://github.com/ansonphong/360-hextile-agent",

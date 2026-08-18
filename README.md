@@ -4,8 +4,8 @@
 
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
-Primary marketplace: **`ansonphong/360-hextile-plugins`** — the shared 360 Hextile catalog. Install id **`hextile@360-hextile`**. The studio-matte plugin `hextile-pipe` ships from the same catalog.
-Standalone marketplace (footnote): **`ansonphong/360-hextile-agent`** — this repo on its own, install id **`hextile@hextile-agent`**.
+Primary marketplace: **`ansonphong/360-hextile-plugins`** — the shared 360 Hextile catalog. Install id **`hextile-agent@360-hextile`**. The studio-matte plugin `hextile-pipe` ships from the same catalog.
+Standalone marketplace (footnote): **`ansonphong/360-hextile-agent`** — this repo on its own, install id **`hextile-agent@hextile-agent`**.
 
 The MCP process is a thin **stdio** JSON-RPC ↔ HTTP proxy (`python3`, stdlib only).  
 All merge, validation, and render logic stay in the running app at `http://127.0.0.1:8000`.
@@ -25,17 +25,17 @@ Primary — the 360 Hextile catalog (ships this plugin **and** `hextile-pipe`):
 
 ```bash
 /plugin marketplace add ansonphong/360-hextile-plugins
-/plugin install hextile@360-hextile
+/plugin install hextile-agent@360-hextile
 ```
 
 Standalone — this repo as its own marketplace:
 
 ```bash
 /plugin marketplace add ansonphong/360-hextile-agent
-/plugin install hextile@hextile-agent
+/plugin install hextile-agent@hextile-agent
 ```
 
-Local checkout of this tree still works: add the directory as a marketplace root, then `/plugin install hextile@hextile-agent`.
+Local checkout of this tree still works: add the directory as a marketplace root, then `/plugin install hextile-agent@hextile-agent`.
 
 ```bash
 # package root is the plugin root:
@@ -71,7 +71,7 @@ A local checkout still works: `grok plugin marketplace add /path/to/hextile-agen
 
 ## Install — Codex
 
-From the 360 Hextile catalog (`ansonphong/360-hextile-plugins`): `codex plugin marketplace add <path-or-github>` then `codex plugin add hextile@360-hextile`.
+From the 360 Hextile catalog (`ansonphong/360-hextile-plugins`): `codex plugin marketplace add <path-or-github>` then `codex plugin add hextile-agent@360-hextile`.
 
 Standalone — clone this repo and run the installer:
 

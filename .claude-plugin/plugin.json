@@ -1,5 +1,5 @@
 {
-  "name": "hextile",
+  "name": "hextile-agent",
   "version": "0.2.1",
   "description": "Drive 360 Hextile workflows from Claude Code — list/save templates, run and monitor renders, 360-LoRA seeds, bundled guides.",
   "author": {
