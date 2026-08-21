@@ -7,6 +7,14 @@ description: "Drive 360 Hextile workflows from an AI coding agent. Use when gene
 
 Drive **360 Hextile** (desktop app) while it is running on this machine. Tools talk to `http://127.0.0.1:8000` through the `hextile` MCP server. **The server owns config authority** — merge, `HextileConfig` validation, and queueing happen in the app, not in this plugin.
 
+Install id: **`hextile-agent@360-hextile`**. Marketplace `360-hextile`. Skill/MCP token `hextile`. Do not install `hextile@360-hextile`.
+
+See `references/agent-lexicon.md` for locked words, the complementarity card, and `REFUSE_*` strings.
+
+- Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
+- MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
+- MCP cannot `goto` or operate Layers (`REFUSE_NAV_MCP`, `REFUSE_LAYERS_MCP`).
+
 Before composing fields or teaching the user, call `get_guide` (`workflow-schema`, `best-practices`, `recipes`, `website-index`). Fetch website URLs from `website-index` when you need product-domain depth.
 
 ## Prerequisites
@@ -39,6 +47,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 |------|-------------|----------|
 | `get_capabilities` | Handshake before a session | no |
 | `get_live_context` | Studio snapshot (follow + doc_generation + live export) | no |
+| `apply_config_delta` | Live delta on the open file (follow ON). Never queues | **yes** |
 | `get_guide` | Schema, practices, recipes, website index | no |
 | `list_workflows` | Discover templates | no |
 | `get_workflow` | Read one template before override or clone | no |
@@ -100,6 +109,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 Never write retired source types (`pattern`, `360_lora`, …) into render-time `input.source`.
 
 `generate_seed` hits **`POST /api/360-lora/generate`** (not `/api/lora-360`).
+
+`generate_seed` can take up to **300s**. If the host times out, recover with `list_seed_history` / `get_seed_batch` — do not assume the job died. `cancel_seed` cancels **whatever seed job is live** (no batch id). It is global. Undo of a live apply is studio `loadConfig`, not this tool. Follow GET-apply of a finished **run** may still paint sliders (accepted leftover).
 
 ## App-down / upgrade recovery
 
