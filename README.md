@@ -15,7 +15,7 @@ All merge, validation, and render logic stay in the running app at `http://127.0
 | Requirement | Notes |
 |-------------|--------|
 | **360 Hextile running** | Backend on `127.0.0.1:8000` |
-| **python3 ≥ 3.9** | On PATH — powers the MCP proxy (zero pip installs). On Windows, Claude `.mcp.json` `command` should be `python` or `py -3`, not `python3`. Codex installer already writes `sys.executable`. |
+| **python3 ≥ 3.9** | On PATH — powers the MCP proxy (zero pip installs). On Windows, Claude `.mcp.json` `command` should be `python` or `py -3`, not `python3`. Optional launcher: `mcp/hextile-mcp.cmd` (picks `python` / `python3` / `py -3`). Committed `.mcp.json` stays `python3`. Codex installer already writes `sys.executable`. |
 | App with `POST /api/workflows/run` | Workflow automation P0+ |
 | Claude Code **or** Codex ≥ 0.34.0 | Install path below |
 
