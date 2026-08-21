@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v0.2.1 tools (20): catalog + persist + run + monitor + config + seed + models + guides.
+v0.2.1 tools (21): catalog + persist + run + monitor + config + seed + models + guides + live context.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ TOOL_NAMES = (
     "list_workflows",
     "get_workflow",
     "get_capabilities",
+    "get_live_context",
     "save_workflow",
     "delete_workflow",
     "run_workflow",
@@ -65,6 +66,7 @@ _READ_ONLY = frozenset(
         "list_workflows",
         "get_workflow",
         "get_capabilities",
+        "get_live_context",
         "validate_config",
         "get_status",
         "get_render_config",
@@ -155,6 +157,25 @@ TOOLS: list[dict[str, Any]] = [
         "Handshake: GET /api/workflows/capabilities "
         "(workflow_api_version + features).",
         {},
+    ),
+    _tool_def(
+        "get_live_context",
+        "Read-only studio snapshot (K1). Follow state, doc_generation FNV hex, "
+        "and identity-stripped live export when the studio is present. "
+        "403 studio_not_present if the FE RAM slot is empty. "
+        "Does not merge. include_nav and include_active_tool default false.",
+        {
+            "include_nav": {
+                "type": "boolean",
+                "description": "Include descriptive nav manifest. Default false.",
+                "default": False,
+            },
+            "include_active_tool": {
+                "type": "boolean",
+                "description": "Include compact active viewer tool. Default false.",
+                "default": False,
+            },
+        },
     ),
     _tool_def(
         "save_workflow",
@@ -513,6 +534,7 @@ class HextileMcpServer:
             "list_workflows": self._list_workflows,
             "get_workflow": self._get_workflow,
             "get_capabilities": self._get_capabilities,
+            "get_live_context": self._get_live_context,
             "save_workflow": self._save_workflow,
             "delete_workflow": self._delete_workflow,
             "run_workflow": self._run_workflow,
@@ -553,7 +575,7 @@ class HextileMcpServer:
                         "version": SERVER_VERSION,
                     },
                     "instructions": (
-                        "Call get_guide before compose; "
+                        "Call get_capabilities then get_live_context before compose; "
                         "validate_config before run_workflow."
                     ),
                 },
@@ -767,6 +789,23 @@ class HextileMcpServer:
 
     def _get_capabilities(self, _args: dict[str, Any]) -> Any:
         return self.client.get_capabilities()
+
+    def _get_live_context(self, args: dict[str, Any]) -> Any:
+        try:
+            return self.client.get_live_context(
+                include_nav=bool(args.get("include_nav", False)),
+                include_active_tool=bool(args.get("include_active_tool", False)),
+            )
+        except HextileClientError as exc:
+            body = exc.body or ""
+            if exc.status_code == 403 and "studio_not_present" in body:
+                raise HextileClientError(
+                    "Studio isn't present. Open 360 Hextile with a document.",
+                    status_code=403,
+                    body=body,
+                    kind="http",
+                ) from exc
+            raise
 
     def _save_workflow(self, args: dict[str, Any]) -> Any:
         return self.client.save_workflow(

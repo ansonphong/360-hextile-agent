@@ -38,6 +38,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | Tool | When to use | Mutates? |
 |------|-------------|----------|
 | `get_capabilities` | Handshake before a session | no |
+| `get_live_context` | Studio snapshot (follow + doc_generation + live export) | no |
 | `get_guide` | Schema, practices, recipes, website index | no |
 | `list_workflows` | Discover templates | no |
 | `get_workflow` | Read one template before override or clone | no |
@@ -60,7 +61,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 
 ### Selection guide
 
-1. **Handshake** → `get_capabilities`.
+1. **Handshake** → `get_capabilities` then `get_live_context` before compose.
 2. **Learn** → `get_guide` (`best-practices` then `workflow-schema`).
 3. **Discover** → `list_workflows` → pick `origin` + `id`.
 4. **Inspect** → `get_workflow` if you need defaults before overriding.
@@ -116,6 +117,7 @@ The MCP process **stays up** when the app is down. Retry tools after launch — 
 
 ```
 get_capabilities
+→ get_live_context
 → get_guide(name="best-practices")
 → list_workflows
 → get_workflow(origin="builtin", id="quick-scout")

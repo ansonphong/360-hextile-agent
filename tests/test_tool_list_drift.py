@@ -53,6 +53,7 @@ EXPECTED_TOOLS = (
     "list_workflows",
     "get_workflow",
     "get_capabilities",
+    "get_live_context",
     "save_workflow",
     "delete_workflow",
     "run_workflow",

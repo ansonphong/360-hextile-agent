@@ -202,6 +202,21 @@ class Client:
         """GET /api/workflows/capabilities."""
         return self.get_json("/api/workflows/capabilities")
 
+    def get_live_context(
+        self,
+        *,
+        include_nav: bool = False,
+        include_active_tool: bool = False,
+    ) -> Any:
+        """GET /api/agent/live-context. No local merge."""
+        return self.get_json(
+            "/api/agent/live-context",
+            params={
+                "include_nav": 1 if include_nav else 0,
+                "include_active_tool": 1 if include_active_tool else 0,
+            },
+        )
+
     def save_workflow(
         self,
         origin: str,
