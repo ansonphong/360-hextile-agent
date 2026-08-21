@@ -890,6 +890,20 @@ class HextileMcpServer:
                 status_code=422,
                 kind="http",
             )
+        for key in ("id", "name", "configFileName", "currentRenderId"):
+            if key in partial:
+                raise HextileClientError(
+                    "I can't change the document name, file name, or current render id.",
+                    status_code=422,
+                    kind="http",
+                )
+        if "pipeline" in partial:
+            raise HextileClientError(
+                "I can't change the pipeline on the open file. "
+                "Use run_workflow if you need a different pipeline on a render.",
+                status_code=422,
+                kind="http",
+            )
         gen = args.get("doc_generation")
         if not isinstance(gen, str) or not gen:
             raise HextileClientError(
