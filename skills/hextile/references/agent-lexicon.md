@@ -59,3 +59,12 @@ REFUSE_IDENTITY
 3. `render_config._deep_merge` — tile/pass twin, **not** the run merger.
 
 `CopilotService._deep_merge` wraps (1). `overrides` ≡ `config_partial`.
+
+## Live kernel (v1)
+
+- One writer: `copilotApply.applyConfigDelta`.
+- One queue door: `POST /api/workflows/run` (human RENDER or MCP `run_workflow`). Copilot has neither.
+- FE RAM studio slot (preview-slot). `doc_generation` is the FNV-1a hex **string** of the identity-stripped live export.
+- Apply-live body `{config_partial, doc_generation, explanation}`. Ticket; FE merge-then-apply.
+- Empty or expired slot → 403 `studio_not_present`. Slot TTL 30s. FE heartbeat 10s. `pagehide` DELETE. Ticket TTL same clock. Follow OFF or empty republish drops leftover tickets. `startFollow` consumes leftover tickets before poll; busy follow does not consume.
+- Install id `hextile-agent@360-hextile`. Do not rewrite committed `.mcp.json`.
