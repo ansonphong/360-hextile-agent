@@ -202,6 +202,30 @@ class Client:
         """GET /api/workflows/capabilities."""
         return self.get_json("/api/workflows/capabilities")
 
+    def apply_config_delta(
+        self,
+        *,
+        config_partial: Mapping[str, Any],
+        doc_generation: str,
+        explanation: str = "",
+    ) -> Any:
+        """POST /api/agent/apply-live. No local merge. Never coerce {}."""
+        if not isinstance(config_partial, Mapping):
+            raise HextileClientError(
+                "config_partial must be a JSON object",
+                status_code=None,
+                kind="other",
+            )
+        return self.post_json(
+            "/api/agent/apply-live",
+            {
+                "config_partial": dict(config_partial),
+                "doc_generation": str(doc_generation),
+                "explanation": explanation,
+            },
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
     def get_live_context(
         self,
         *,

@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v0.2.1 tools (21): catalog + persist + run + monitor + config + seed + models + guides + live context.
+v0.2.1 tools (22): catalog + persist + run + monitor + config + seed + models + guides + live context + live apply.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ TOOL_NAMES = (
     "get_workflow",
     "get_capabilities",
     "get_live_context",
+    "apply_config_delta",
     "save_workflow",
     "delete_workflow",
     "run_workflow",
@@ -81,6 +82,7 @@ _READ_ONLY = frozenset(
 )
 _MUTATING = frozenset(
     {
+        "apply_config_delta",
         "save_workflow",
         "delete_workflow",
         "run_workflow",
@@ -106,6 +108,29 @@ def _annotations(name: str) -> dict[str, bool]:
     if name in {"cancel_run", "cancel_seed", "delete_workflow"}:
         return {"readOnlyHint": False, "destructiveHint": True}
     return {"readOnlyHint": False, "destructiveHint": False}
+
+
+def _map_apply_live_refuse(exc: HextileClientError) -> str:
+    blob = f"{exc.body or ''} {exc}"
+    if "studio_not_present" in blob:
+        return "Studio isn't present. Open 360 Hextile with a document."
+    if "follow_off" in blob:
+        return (
+            "Studio isn't following. Turn on MCP follow to apply this to the "
+            "open file, or use run_workflow to queue a render."
+        )
+    if "stale_snapshot" in blob:
+        return "The open file changed. Call get_live_context again and retry."
+    if "identity_key" in blob:
+        return "I can't change the document name, file name, or current render id."
+    if "pipeline_key" in blob:
+        return (
+            "I can't change the pipeline on the open file. "
+            "Use run_workflow if you need a different pipeline on a render."
+        )
+    if "empty_partial" in blob:
+        return "config_partial must be a non-empty object."
+    return str(exc)
 
 
 def _tool_def(
@@ -178,6 +203,31 @@ TOOLS: list[dict[str, Any]] = [
         },
     ),
     _tool_def(
+        "apply_config_delta",
+        "Apply a live delta to the open studio document when MCP follow is ON. "
+        "Never queues GPU. Requires config_partial + doc_generation (FNV hex). "
+        "Forbidden: confirm, dry_run, workflow_id, document, queue. "
+        "Follow OFF → follow_off. Pipeline / identity keys refused.",
+        {
+            "config_partial": {
+                "type": "object",
+                "description": (
+                    "Delta only. Arrays replace wholesale. Never identity keys "
+                    "(id, name, configFileName, currentRenderId) or pipeline."
+                ),
+            },
+            "doc_generation": {
+                "type": "string",
+                "description": "FNV-1a hex from get_live_context.doc_generation",
+            },
+            "explanation": {
+                "type": "string",
+                "description": "Short reason for the live apply",
+            },
+        },
+        required=["config_partial", "doc_generation"],
+    ),
+    _tool_def(
         "save_workflow",
         "Create-only persist of a .hextile.json document on the user or "
         "project shelf. Builtin is immutable. Existing id → HTTP 409; "
@@ -216,7 +266,8 @@ TOOLS: list[dict[str, Any]] = [
         "run_workflow",
         "Merge overrides into a workflow, validate, and queue a render. "
         "Server owns deep-merge + HextileConfig validation — send overrides only. "
-        "Arrays replace wholesale (add a LoRA ≠ append).",
+        "Requires workflow_id XOR document (exactly one). "
+        "Arrays replace wholesale (add a LoRA ≠ append). No confirm argument.",
         {
             "workflow_id": {
                 "type": "string",
@@ -233,7 +284,10 @@ TOOLS: list[dict[str, Any]] = [
             },
             "overrides": {
                 "type": "object",
-                "description": "Partial deep-merge onto the template (server-side)",
+                "description": (
+                    "Partial deep-merge onto the template (server-side). "
+                    "Arrays replace wholesale."
+                ),
             },
             "output": {
                 "type": "object",
@@ -338,6 +392,8 @@ TOOLS: list[dict[str, Any]] = [
                 "type": "integer",
                 "description": "Number of variations (1–8)",
                 "default": 4,
+                "minimum": 1,
+                "maximum": 8,
             },
             "trigger_word": {
                 "type": "string",
@@ -412,6 +468,7 @@ TOOLS: list[dict[str, Any]] = [
     _tool_def(
         "cancel_seed",
         "Stop the live 360-LoRA job (POST /api/360-lora/cancel). "
+        "Cancels whatever seed is live — no batch id, global. "
         "Not a render — use cancel_run for renders.",
         {},
     ),
@@ -424,15 +481,15 @@ TOOLS: list[dict[str, Any]] = [
         "list_installed_models",
         "List installed weights for a pipeline "
         "(GET /api/models/{pipeline_id}?installed_only=true). "
-        "Omit pipeline_id for GET /api/models/catalog/status plus a note "
-        "to pass pipeline_id. Dry-run is Pydantic only — this tool is how "
+        "pipeline_id is required. Dry-run is Pydantic only — this tool is how "
         "the agent sees installed weights.",
         {
             "pipeline_id": {
                 "type": "string",
-                "description": "Pipeline id (e.g. sdxl). Omit for catalog/status.",
+                "description": "Pipeline id (e.g. sdxl).",
             },
         },
+        required=["pipeline_id"],
     ),
     _tool_def(
         "get_guide",
@@ -483,7 +540,12 @@ def load_guide(name: str) -> dict[str, Any]:
 
 
 def _overrides_keys(name: str, args: Mapping[str, Any]) -> Optional[list[str]]:
-    """Names only of args.overrides for validate_config / run_workflow."""
+    """Names only of args.overrides / config_partial. Never values."""
+    if name == "apply_config_delta":
+        partial = args.get("config_partial")
+        if not isinstance(partial, Mapping):
+            return None
+        return [str(k) for k in partial.keys()]
     if name not in ("validate_config", "run_workflow"):
         return None
     overrides = args.get("overrides")
@@ -535,6 +597,7 @@ class HextileMcpServer:
             "get_workflow": self._get_workflow,
             "get_capabilities": self._get_capabilities,
             "get_live_context": self._get_live_context,
+            "apply_config_delta": self._apply_config_delta,
             "save_workflow": self._save_workflow,
             "delete_workflow": self._delete_workflow,
             "run_workflow": self._run_workflow,
@@ -807,11 +870,74 @@ class HextileMcpServer:
                 ) from exc
             raise
 
+    def _apply_config_delta(self, args: dict[str, Any]) -> Any:
+        if "config_partial" not in args:
+            raise HextileClientError(
+                "config_partial is required",
+                status_code=None,
+                kind="other",
+            )
+        partial = args.get("config_partial")
+        if not isinstance(partial, dict):
+            raise HextileClientError(
+                "config_partial must be an object",
+                status_code=None,
+                kind="other",
+            )
+        if not partial:
+            raise HextileClientError(
+                "config_partial must be a non-empty object.",
+                status_code=422,
+                kind="http",
+            )
+        gen = args.get("doc_generation")
+        if not isinstance(gen, str) or not gen:
+            raise HextileClientError(
+                "doc_generation is required",
+                status_code=None,
+                kind="other",
+            )
+        for forbidden in (
+            "confirm",
+            "dry_run",
+            "workflow_id",
+            "document",
+            "queue",
+            "force",
+            "skip_follow",
+        ):
+            if forbidden in args:
+                raise HextileClientError(
+                    f"{forbidden} is not allowed on apply_config_delta",
+                    status_code=None,
+                    kind="other",
+                )
+        try:
+            return self.client.apply_config_delta(
+                config_partial=partial,
+                doc_generation=gen,
+                explanation=str(args.get("explanation") or ""),
+            )
+        except HextileClientError as exc:
+            raise HextileClientError(
+                _map_apply_live_refuse(exc),
+                status_code=exc.status_code,
+                body=exc.body,
+                kind=exc.kind,
+            ) from exc
+
     def _save_workflow(self, args: dict[str, Any]) -> Any:
+        document = args.get("document")
+        if not isinstance(document, dict):
+            raise HextileClientError(
+                "document is required and must be a JSON object",
+                status_code=None,
+                kind="other",
+            )
         return self.client.save_workflow(
             str(args.get("origin") or "user"),
             str(args.get("id") or args.get("workflow_id") or ""),
-            args.get("document") or {},
+            document,
         )
 
     def _delete_workflow(self, args: dict[str, Any]) -> Any:
@@ -821,10 +947,20 @@ class HextileMcpServer:
         )
 
     def _run_workflow(self, args: dict[str, Any]) -> Any:
+        workflow_id = args.get("workflow_id")
+        document = args.get("document")
+        has_id = isinstance(workflow_id, str) and bool(workflow_id)
+        has_doc = isinstance(document, dict)
+        if has_id == has_doc:
+            raise HextileClientError(
+                "run_workflow requires workflow_id XOR document",
+                status_code=None,
+                kind="other",
+            )
         return self.client.run_workflow(
-            workflow_id=args.get("workflow_id"),
+            workflow_id=workflow_id if has_id else None,
             origin=str(args.get("origin") or "builtin"),
-            document=args.get("document"),
+            document=document if has_doc else None,
             overrides=args.get("overrides"),
             output=args.get("output"),
             dry_run=bool(args.get("dry_run", False)),
@@ -944,7 +1080,13 @@ class HextileMcpServer:
 
     def _list_installed_models(self, args: dict[str, Any]) -> Any:
         raw = args.get("pipeline_id")
-        pipeline_id = str(raw).strip() if raw else None
+        pipeline_id = str(raw).strip() if raw else ""
+        if not pipeline_id:
+            raise HextileClientError(
+                "pipeline_id is required",
+                status_code=None,
+                kind="other",
+            )
         return self.client.list_installed_models(pipeline_id)
 
     def _get_guide(self, args: dict[str, Any]) -> Any:
