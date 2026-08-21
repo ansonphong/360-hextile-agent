@@ -55,19 +55,19 @@ Primary — the 360 Hextile catalog:
 
 ```bash
 grok plugin marketplace add ansonphong/360-hextile-plugins
-grok plugin install hextile --trust
+grok plugin install hextile-agent --trust
 ```
 
 Standalone — this repo as its own marketplace:
 
 ```bash
 grok plugin marketplace add ansonphong/360-hextile-agent
-grok plugin install hextile --trust
+grok plugin install hextile-agent --trust
 ```
 
-Enable `hextile` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
+Enable `hextile-agent` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
 
-A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install hextile --trust`.
+A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install hextile-agent --trust`.
 
 ## Install — Codex
 
