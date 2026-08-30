@@ -25,7 +25,7 @@ import shutil
 import sys
 from pathlib import Path
 
-PACKAGE_VERSION = "0.2.1"
+PACKAGE_VERSION = "0.3.0"
 MIN_CODEX = "0.34.0"
 MARKER_NAME = ".hextile-agent-marker"
 MCP_SECTION = "mcp_servers.hextile"

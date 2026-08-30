@@ -1,6 +1,6 @@
 # 360-hextile-agent
 
-**v0.2.1**
+**v0.3.0**
 
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
@@ -84,6 +84,7 @@ python3 codex/install.py
 This writes:
 
 - `~/.agents/skills/hextile/SKILL.md` + `references/`
+- `~/.agents/skills/hextile-upres/SKILL.md`
 - `[mcp_servers.hextile]` **stdio** entry in `~/.codex/config.toml`  
   (`command` is the absolute `sys.executable`, `args = ["…/mcp/hextile_mcp.py"]`)
 
@@ -97,13 +98,36 @@ Restart Codex and run `/mcp` — you should see `hextile`.
 
 Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
 
-## Tools (20)
+## /hextile-upres
+
+GPU Real-ESRGAN upres through the running 360 Hextile app. Skill name is **`/hextile-upres`** (not bare `/upres`; the description also triggers on `/upres`). Not `hextile-pipe`. Do not invent `upscale_image`.
+
+| Input | Door |
+|-------|------|
+| One still | `run_workflow` + builtin `upres-still` (`pipeline: realesrgan`) |
+| Folder of stills, or video | sequence tools (`extract_sequence_video` if video, then `create_sequence` / `start_sequence` / `get_sequence`) |
+
+`run_workflow` cannot create a `seq_*`. Folder and video must use the sequence tools.
+
+### Hosts
+
+Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
+
+| Host | How `/hextile-upres` lands |
+|------|---------------------------|
+| **Claude Code** | Plugin skills auto-discover from `plugin.json` `"skills": "./skills/"` after `/plugin install hextile-agent@360-hextile` (or marketplace update + `/plugin update hextile-agent`). |
+| **Grok** | Catalog SHA pin in `ansonphong/360-hextile-plugins`. After that pin is on GitHub: `grok plugin marketplace update` then `grok plugin update hextile-agent`. |
+| **Codex** | `python3 codex/install.py` writes `~/.agents/skills/hextile-upres/SKILL.md`. |
+
+## Tools (28)
 
 | Tool | HTTP / source |
 |------|----------------|
 | `list_workflows` | `GET /api/workflows` |
 | `get_workflow` | `GET /api/workflows/{origin}/{id}` |
 | `get_capabilities` | `GET /api/workflows/capabilities` |
+| `get_live_context` | `GET /api/agent/live-context` |
+| `apply_config_delta` | `POST /api/agent/apply-live` |
 | `save_workflow` | `POST /api/workflows/{user\|project}` |
 | `delete_workflow` | `DELETE /api/workflows/{origin}/{id}` |
 | `run_workflow` | `POST /api/workflows/run` |
@@ -121,9 +145,15 @@ Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-sta
 | `list_360_loras` | `GET /api/360-lora/loras` |
 | `list_installed_models` | `GET /api/models/{pipeline_id}?installed_only=true` |
 | `get_guide` | bundled `skills/hextile/references/*.md` |
+| `extract_sequence_video` | `POST /api/sequences/extract-video` |
+| `create_sequence` | `POST /api/sequences/create` |
+| `start_sequence` | `POST /api/sequences/{id}/start` |
+| `get_sequence` | `GET /api/sequences/{id}` |
+| `list_sequences` | `GET /api/sequences/` |
+| `stop_sequence` | `POST /api/sequences/{id}/stop` |
 
-Instruction surface: **`skills/hextile/SKILL.md`** (canonical).  
-Codex `AGENTS-fragment.md` is a frontmatter-stripped copy — edit SKILL only.
+Instruction surface: **`skills/hextile/SKILL.md`** (canonical hub) plus **`skills/hextile-upres/SKILL.md`**.  
+Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SKILL only.
 
 ## App not running
 
@@ -154,6 +184,7 @@ hextile-agent/
   .mcp.json
   skills/hextile/SKILL.md
   skills/hextile/references/
+  skills/hextile-upres/SKILL.md
   mcp/hextile_mcp.py
   mcp/hextile_client.py
   codex/install.py
