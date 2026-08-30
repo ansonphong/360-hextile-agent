@@ -364,6 +364,60 @@ class Client:
             params={"lifecycle_status": status},
         )
 
+    # ── sequences ───────────────────────────────────────────────────────
+
+    def extract_sequence_video(self, video_path: str) -> Any:
+        """POST /api/sequences/extract-video {video_path}."""
+        return self.post_json(
+            "/api/sequences/extract-video",
+            {"video_path": video_path},
+            timeout=GENERATE_TIMEOUT_S,
+        )
+
+    def create_sequence(
+        self,
+        folder_path: str,
+        config: Mapping[str, Any],
+        name: Optional[str] = None,
+    ) -> Any:
+        """POST /api/sequences/create — folder_path + full config. No local merge."""
+        if not isinstance(config, Mapping):
+            raise HextileClientError(
+                "config must be a JSON object",
+                status_code=None,
+                kind="other",
+            )
+        body: dict[str, Any] = {
+            "folder_path": folder_path,
+            "config": dict(config),
+        }
+        if name is not None:
+            body["name"] = name
+        return self.post_json("/api/sequences/create", body)
+
+    def start_sequence(self, sequence_id: str) -> Any:
+        """POST /api/sequences/{sequence_id}/start."""
+        sid = urllib.parse.quote(sequence_id, safe="")
+        return self.post_json(f"/api/sequences/{sid}/start")
+
+    def get_sequence(self, sequence_id: str) -> Any:
+        """GET /api/sequences/{sequence_id}."""
+        sid = urllib.parse.quote(sequence_id, safe="")
+        return self.get_json(f"/api/sequences/{sid}")
+
+    def list_sequences(self, lifecycle_status: str = "active") -> Any:
+        """GET /api/sequences/?lifecycle_status= (default active)."""
+        status = lifecycle_status or "active"
+        return self.get_json(
+            "/api/sequences/",
+            params={"lifecycle_status": status},
+        )
+
+    def stop_sequence(self, sequence_id: str) -> Any:
+        """POST /api/sequences/{sequence_id}/stop."""
+        sid = urllib.parse.quote(sequence_id, safe="")
+        return self.post_json(f"/api/sequences/{sid}/stop")
+
     # ── seed ────────────────────────────────────────────────────────────
 
     def generate_seed(
