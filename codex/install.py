@@ -4,6 +4,8 @@
 Writes:
   ~/.agents/skills/hextile/SKILL.md
   ~/.agents/skills/hextile/.hextile-agent-marker  (version marker)
+  ~/.agents/skills/hextile-upres/SKILL.md
+  ~/.agents/skills/hextile-upres/.hextile-agent-marker
   [mcp_servers.hextile] into ~/.codex/config.toml  (stdio only)
 
 Usage:
@@ -79,21 +81,21 @@ def mcp_block(script: Path) -> str:
     )
 
 
-def ensure_skills(home: Path, dry_run: bool) -> Path:
-    agents_root = home / ".agents" / "skills" / "hextile"
-    dest_skill = agents_root / "SKILL.md"
-    marker = agents_root / MARKER_NAME
-    src = skill_source()
+def _copy_skill_dest(home: Path, name: str, dry_run: bool) -> Path:
+    dest_root = home / ".agents" / "skills" / name
+    dest_skill = dest_root / "SKILL.md"
+    marker = dest_root / MARKER_NAME
+    src = package_root() / "skills" / name / "SKILL.md"
     if not src.is_file():
         raise SystemExit(f"Missing skill source: {src}")
     if dry_run:
         print(f"[dry-run] would write {dest_skill}")
         print(f"[dry-run] would write {marker}")
-        return agents_root
-    agents_root.mkdir(parents=True, exist_ok=True)
+        return dest_root
+    dest_root.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest_skill)
-    src_refs = package_root() / "skills" / "hextile" / "references"
-    dest_refs = agents_root / "references"
+    src_refs = package_root() / "skills" / name / "references"
+    dest_refs = dest_root / "references"
     if src_refs.is_dir():
         if dest_refs.exists():
             shutil.rmtree(dest_refs)
@@ -105,6 +107,12 @@ def ensure_skills(home: Path, dry_run: bool) -> Path:
     )
     print(f"Wrote {dest_skill}")
     print(f"Wrote {marker}")
+    return dest_root
+
+
+def ensure_skills(home: Path, dry_run: bool) -> Path:
+    agents_root = _copy_skill_dest(home, "hextile", dry_run)
+    _copy_skill_dest(home, "hextile-upres", dry_run)
     return agents_root
 
 
@@ -159,6 +167,12 @@ def uninstall(home: Path, dry_run: bool) -> None:
         _rmtree(agents_root, dry_run)
     else:
         print(f"No skills dir at {agents_root}")
+
+    upres_root = home / ".agents" / "skills" / "hextile-upres"
+    if upres_root.is_dir() and (upres_root / MARKER_NAME).is_file():
+        _rmtree(upres_root, dry_run)
+    elif upres_root.is_dir():
+        print(f"Leaving unmarked {upres_root}")
 
     # Marker-owned leftover from pre-0.2.1 (~/.codex/skills/hextile). Never
     # delete an unmarked tree or sibling files.
