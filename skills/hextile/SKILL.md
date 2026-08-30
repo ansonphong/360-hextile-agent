@@ -80,6 +80,12 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 8. **Save a variant** → `save_workflow` (`user`/`project`, **new** id). Create-only; 409 means pick another id.
 9. **Abort** → `cancel_run`.
 
+## Upres
+
+GPU upres of a still, a folder, or a video → skill `/hextile-upres`. Do not invent `upscale_image`. Do not send GPU upres through `hextile-pipe`.
+
+Stills use `run_workflow` with builtin `upres-still`. Folders and video use that skill's sequence door (`run_workflow` cannot create a `seq_*`). Recipes E (still) and F (folder/video) live in `get_guide` `recipes`.
+
 ## Safety — overrides, never authority
 
 - Send **`workflow_id` + `overrides`** (and optional `output`). Prefer **not** composing a full raw config as authority.

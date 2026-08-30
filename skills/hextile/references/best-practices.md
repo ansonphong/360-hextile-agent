@@ -33,7 +33,8 @@ Send **`workflow_id` + `overrides`**, or a full `document` you cloned from `get_
 
 ## Safety
 
-- Cancel with `cancel_run` before starting a second heavy GPU job if one is `running`.
+- Cancel with `cancel_run` before starting a second heavy GPU job if one is `running`. `stop_sequence` before a second sequence if one is `processing`.
+- GPU upres of many frames is a sequence via `/hextile-upres`, not a loop of `run_workflow` over a frame folder.
 - Do not delete builtin. Do not `delete_workflow` unless the user asked.
 - License HTTP 402 → tell the user to activate in Settings.
 

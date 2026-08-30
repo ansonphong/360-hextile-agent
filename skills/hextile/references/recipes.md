@@ -47,3 +47,38 @@ get_status(run_id=render_id)
 ```
 
 Terminal statuses: `completed`, `failed`, `cancelled`, `crashed`. Stop uses `cancelled`, not `stopped`.
+
+## Recipe E — Upres still
+
+```
+get_capabilities
+validate_config(workflow_id=upres-still, origin=builtin, overrides={
+  "input": {"path": "<absolute image path>", "source": "file"},
+  "upscaling": {"scale_factor": 2 or 4}
+})
+run_workflow(same)
+get_status(run_id)
+```
+
+Builtin default is 4×. Omit `upscaling` unless the user asked for 2×. `cancel_run` before a second heavy GPU job.
+
+## Recipe F — Upres folder or video
+
+`run_workflow` cannot create a `seq_*`. Do not loop `run_workflow` over frames.
+
+Tools: `extract_sequence_video`, `create_sequence`, `start_sequence`, `get_sequence`, `list_sequences`, `stop_sequence`.
+
+```
+extract_sequence_video({video_path})   # video only; use returned folder_path
+get_workflow(origin=builtin, id=upres-still)
+# If pipeline is top-level, that object is the document.
+# If nested document.pipeline exists, use that nested object.
+# Patch input.mode=sequence, input.path=<folder>, input.source=file,
+# optional upscaling.scale_factor 2 or 4.
+# Never POST a partial {pipeline, input, upscaling} stub — 422.
+create_sequence({folder_path, config: patched document})
+start_sequence
+get_sequence   # poll while queued or processing
+```
+
+`create_sequence.config` is a full `HextileConfig` cloned from `upres-still`. Stop and report `paused` and `incomplete` (`incomplete` is resumable in the app; v1 has no resume MCP tool). Terminal: `completed`, `completed_with_errors`, `failed`, `cancelled`. Cancel with `stop_sequence`. Use `list_sequences` if the id is lost.
