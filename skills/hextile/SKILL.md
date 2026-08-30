@@ -67,6 +67,12 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `list_seed_history` | Recover seed batches after the 300s generate_seed timeout | no |
 | `get_seed_batch` | Recover one seed batch after the 300s generate_seed timeout | no |
 | `cancel_seed` | Stop the live 360-LoRA job, not a render | **yes** |
+| `extract_sequence_video` | Extract video frames to a folder (video sequence door) | **yes** |
+| `create_sequence` | Create a `seq_*` from a folder + full config (not `run_workflow`) | **yes** |
+| `start_sequence` | Queue GPU for an existing sequence | **yes** |
+| `get_sequence` | Poll `sequence_id` progress / output (not `get_status`) | no |
+| `list_sequences` | Find sequences if you lost `sequence_id` | no |
+| `stop_sequence` | Kill a running sequence | **yes** |
 
 ### Selection guide
 

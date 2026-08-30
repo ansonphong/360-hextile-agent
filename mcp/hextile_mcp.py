@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v0.2.1 tools (22): catalog + persist + run + monitor + config + seed + models + guides + live context + live apply.
+v0.3.0 tools (28): catalog + persist + run + monitor + config + seed + models + guides + live context + live apply + sequences.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from hextile_client import (  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
-SERVER_VERSION = "0.2.1"
+SERVER_VERSION = "0.3.0"
 ACTIVITY_SCHEMA = "hextile.agent.activity.v1"
 
 # Canonical tool names — drift tests assert SKILL.md ⊆ this list.
@@ -59,6 +59,12 @@ TOOL_NAMES = (
     "list_360_loras",
     "list_installed_models",
     "get_guide",
+    "extract_sequence_video",
+    "create_sequence",
+    "start_sequence",
+    "get_sequence",
+    "list_sequences",
+    "stop_sequence",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -78,6 +84,8 @@ _READ_ONLY = frozenset(
         "list_360_loras",
         "list_installed_models",
         "get_guide",
+        "get_sequence",
+        "list_sequences",
     }
 )
 _MUTATING = frozenset(
@@ -90,6 +98,10 @@ _MUTATING = frozenset(
         "cancel_run",
         "retry_run",
         "cancel_seed",
+        "extract_sequence_video",
+        "create_sequence",
+        "start_sequence",
+        "stop_sequence",
     }
 )
 
@@ -105,7 +117,7 @@ _GUIDE_ROOT = Path(__file__).resolve().parent.parent / "skills" / "hextile" / "r
 def _annotations(name: str) -> dict[str, bool]:
     if name in _READ_ONLY:
         return {"readOnlyHint": True, "destructiveHint": False}
-    if name in {"cancel_run", "cancel_seed", "delete_workflow"}:
+    if name in {"cancel_run", "cancel_seed", "delete_workflow", "stop_sequence"}:
         return {"readOnlyHint": False, "destructiveHint": True}
     return {"readOnlyHint": False, "destructiveHint": False}
 
@@ -505,6 +517,91 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     ),
+    _tool_def(
+        "extract_sequence_video",
+        "Extract video frames to a folder (POST /api/sequences/extract-video). "
+        "Returns folder_path for create_sequence. "
+        "Suffixes .mp4 .mpg .mpeg .m4v .mov. Not run_workflow.",
+        {
+            "video_path": {
+                "type": "string",
+                "description": "Absolute path to a video file",
+            },
+        },
+        required=["video_path"],
+    ),
+    _tool_def(
+        "create_sequence",
+        "Create a seq_* from a folder of stills (POST /api/sequences/create). "
+        "config is a full HextileConfig (clone get_workflow upres-still; "
+        "never a partial). run_workflow cannot create a seq_*.",
+        {
+            "folder_path": {
+                "type": "string",
+                "description": "Absolute folder of stills (or extract_sequence_video folder_path)",
+            },
+            "config": {
+                "type": "object",
+                "description": (
+                    "Full HextileConfig document (pipeline, hextile.template, "
+                    "diffusion.model, input, …). Not a partial."
+                ),
+            },
+            "name": {
+                "type": "string",
+                "description": "Optional sequence display name",
+            },
+        },
+        required=["folder_path", "config"],
+    ),
+    _tool_def(
+        "start_sequence",
+        "Start GPU processing of an existing sequence "
+        "(POST /api/sequences/{sequence_id}/start).",
+        {
+            "sequence_id": {
+                "type": "string",
+                "description": "Sequence id (seq_*) from create_sequence",
+            },
+        },
+        required=["sequence_id"],
+    ),
+    _tool_def(
+        "get_sequence",
+        "Poll sequence status by sequence_id (GET /api/sequences/{id}). "
+        "Never pass a seq_* to get_status.",
+        {
+            "sequence_id": {
+                "type": "string",
+                "description": "Sequence id (seq_*)",
+            },
+        },
+        required=["sequence_id"],
+    ),
+    _tool_def(
+        "list_sequences",
+        "List sequences (monitor without a stored sequence_id). "
+        "GET /api/sequences/?lifecycle_status= (default active).",
+        {
+            "lifecycle_status": {
+                "type": "string",
+                "description": "active | archived | trashed",
+                "default": "active",
+            },
+        },
+    ),
+    _tool_def(
+        "stop_sequence",
+        "Stop a running sequence (POST /api/sequences/{id}/stop). "
+        "Status → cancelled. Destructive. Not cancel_run.",
+        {
+            "sequence_id": {
+                "type": "string",
+                "description": "Sequence id (seq_*) to stop",
+            },
+        },
+        required=["sequence_id"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
@@ -615,6 +712,12 @@ class HextileMcpServer:
             "list_360_loras": self._list_360_loras,
             "list_installed_models": self._list_installed_models,
             "get_guide": self._get_guide,
+            "extract_sequence_video": self._extract_sequence_video,
+            "create_sequence": self._create_sequence,
+            "start_sequence": self._start_sequence,
+            "get_sequence": self._get_sequence,
+            "list_sequences": self._list_sequences,
+            "stop_sequence": self._stop_sequence,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -716,7 +819,7 @@ class HextileMcpServer:
             data = handler(args)
             phase = (
                 "cancelled"
-                if name in ("cancel_run", "cancel_seed")
+                if name in ("cancel_run", "cancel_seed", "stop_sequence")
                 else "succeeded"
             )
             self._emit_activity(
@@ -1105,6 +1208,62 @@ class HextileMcpServer:
 
     def _get_guide(self, args: dict[str, Any]) -> Any:
         return load_guide(str(args.get("name") or "index"))
+
+    def _extract_sequence_video(self, args: dict[str, Any]) -> Any:
+        video_path = args.get("video_path")
+        if not video_path:
+            raise HextileClientError(
+                "video_path is required", status_code=None, kind="other"
+            )
+        return self.client.extract_sequence_video(str(video_path))
+
+    def _create_sequence(self, args: dict[str, Any]) -> Any:
+        folder_path = args.get("folder_path")
+        config = args.get("config")
+        if not folder_path:
+            raise HextileClientError(
+                "folder_path is required", status_code=None, kind="other"
+            )
+        if not isinstance(config, dict):
+            raise HextileClientError(
+                "config is required and must be a JSON object",
+                status_code=None,
+                kind="other",
+            )
+        return self.client.create_sequence(
+            str(folder_path),
+            config,
+            name=args.get("name"),
+        )
+
+    def _start_sequence(self, args: dict[str, Any]) -> Any:
+        sequence_id = args.get("sequence_id")
+        if not sequence_id:
+            raise HextileClientError(
+                "sequence_id is required", status_code=None, kind="other"
+            )
+        return self.client.start_sequence(str(sequence_id))
+
+    def _get_sequence(self, args: dict[str, Any]) -> Any:
+        sequence_id = args.get("sequence_id")
+        if not sequence_id:
+            raise HextileClientError(
+                "sequence_id is required", status_code=None, kind="other"
+            )
+        return self.client.get_sequence(str(sequence_id))
+
+    def _list_sequences(self, args: dict[str, Any]) -> Any:
+        return self.client.list_sequences(
+            str(args.get("lifecycle_status") or "active")
+        )
+
+    def _stop_sequence(self, args: dict[str, Any]) -> Any:
+        sequence_id = args.get("sequence_id")
+        if not sequence_id:
+            raise HextileClientError(
+                "sequence_id is required", status_code=None, kind="other"
+            )
+        return self.client.stop_sequence(str(sequence_id))
 
     @staticmethod
     def _response(msg_id: Any, result: Any) -> dict[str, Any]:

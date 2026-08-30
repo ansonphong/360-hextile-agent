@@ -72,6 +72,12 @@ EXPECTED_TOOLS = (
     "list_360_loras",
     "list_installed_models",
     "get_guide",
+    "extract_sequence_video",
+    "create_sequence",
+    "start_sequence",
+    "get_sequence",
+    "list_sequences",
+    "stop_sequence",
 )
 
 
