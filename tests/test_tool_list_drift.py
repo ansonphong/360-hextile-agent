@@ -26,15 +26,19 @@ sys.path.insert(0, str(MCP_DIR))
 
 from hextile_client import (  # noqa: E402
     APP_DOWN_MSG,
+    BATCH_UNAVAILABLE_MSG,
     UPGRADE_MSG,
     Client,
     HextileClientError,
+    error_payload,
 )
 from hextile_mcp import (  # noqa: E402
     GUIDE_NAMES,
     TOOL_NAMES,
     TOOLS,
     HextileMcpServer,
+    _BATCH_TOOLS,
+    _DESTRUCTIVE,
     _MUTATING,
     _READ_ONLY,
     load_guide,
@@ -78,13 +82,27 @@ EXPECTED_TOOLS = (
     "get_sequence",
     "list_sequences",
     "stop_sequence",
+    "preflight_batch",
+    "get_batch_preflight",
+    "start_batch",
+    "list_batches",
+    "get_batch",
+    "get_batch_items",
+    "pause_batch",
+    "resume_batch",
+    "cancel_batch",
+    "retry_batch",
+    "import_batch_outputs",
 )
 
 
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
+    assert len(EXPECTED_TOOLS) == 39
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
+    assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
+    assert len(_BATCH_TOOLS) == 11
 
 
 def test_open4_annotations_partition() -> None:
@@ -95,8 +113,31 @@ def test_open4_annotations_partition() -> None:
         name = t["name"]
         if name in _READ_ONLY:
             assert ann.get("readOnlyHint") is True
+            assert ann.get("destructiveHint") is False
         else:
             assert ann.get("readOnlyHint") is False
+        if name in _DESTRUCTIVE:
+            assert ann.get("destructiveHint") is True
+        else:
+            assert ann.get("destructiveHint") is False
+    for name in (
+        "get_batch_preflight",
+        "list_batches",
+        "get_batch",
+        "get_batch_items",
+    ):
+        assert name in _READ_ONLY
+    for name in (
+        "preflight_batch",
+        "start_batch",
+        "pause_batch",
+        "resume_batch",
+        "cancel_batch",
+        "retry_batch",
+        "import_batch_outputs",
+    ):
+        assert name in _MUTATING
+    assert "cancel_batch" in _DESTRUCTIVE
 
 
 def test_skill_tool_names_subset_of_mcp() -> None:
@@ -223,6 +264,7 @@ def test_mcp_tools_list_rpc() -> None:
     assert resp is not None
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == list(EXPECTED_TOOLS)
+    assert set(server._handlers) == set(EXPECTED_TOOLS)
 
 
 def test_mcp_initialize() -> None:
@@ -317,6 +359,159 @@ def test_codex_install_copies_references(tmp_path: Path) -> None:
     dest = tmp_path / ".agents" / "skills" / "hextile" / "references" / "best-practices.md"
     assert dest.is_file()
     assert "Authority" in dest.read_text(encoding="utf-8")
+
+
+def _tool_schema(name: str) -> dict[str, Any]:
+    for tool in TOOLS:
+        if tool["name"] == name:
+            return tool["inputSchema"]
+    raise AssertionError(f"missing tool {name}")
+
+
+def test_batch_tool_schemas_forbid_additional_properties() -> None:
+    for name in sorted(_BATCH_TOOLS):
+        schema = _tool_schema(name)
+        assert schema.get("additionalProperties") is False
+        for prop in (schema.get("properties") or {}).values():
+            if isinstance(prop, dict) and prop.get("type") == "object" and "properties" in prop:
+                assert prop.get("additionalProperties") is False, name
+
+
+def test_batch_unavailable_is_capability_error() -> None:
+    def boom(req, timeout=None):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            url=req.full_url,
+            code=409,
+            msg="Conflict",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"code":"batch_unavailable","message":"Batch workflows are disabled"}'),
+        )
+
+    client = Client(opener=boom)
+    with pytest.raises(HextileClientError) as ei:
+        client.list_batches()
+    err = ei.value
+    assert err.kind == "capability"
+    assert err.status_code == 409
+    assert BATCH_UNAVAILABLE_MSG in str(err)
+    payload = error_payload(err)
+    assert payload["ok"] is False
+    assert payload["kind"] == "capability"
+    assert payload["code"] == "batch_unavailable"
+
+    server = HextileMcpServer(client=Client(opener=boom))
+    result = server.call_tool("list_batches", {})
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "batch_unavailable" in text
+    assert "unavailable" in text.lower()
+
+
+def test_batch_missing_route_is_capability_error() -> None:
+    def boom(req, timeout=None):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            url=req.full_url,
+            code=404,
+            msg="Not Found",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"detail":"Not Found"}'),
+        )
+
+    client = Client(opener=boom)
+    with pytest.raises(HextileClientError) as ei:
+        client.preflight_batch(
+            {
+                "idempotency_key": "k",
+                "workflow": {"kind": "catalog", "id": "upres-still", "origin": "builtin"},
+                "input": {"kind": "folder", "path": "D:/in"},
+                "output": {"directory": "D:/out", "format": "png"},
+            }
+        )
+    assert ei.value.kind == "capability"
+
+
+def test_unknown_batch_job_stays_http() -> None:
+    def boom(req, timeout=None):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            url=req.full_url,
+            code=404,
+            msg="Not Found",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"code":"unknown_job","message":"unknown job"}'),
+        )
+
+    client = Client(opener=boom)
+    with pytest.raises(HextileClientError) as ei:
+        client.get_batch("01Jmissing")
+    assert ei.value.kind == "http"
+    assert ei.value.status_code == 404
+
+
+def test_get_batch_preflight_polls_scanning(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    class FakeClient:
+        def get_batch_preflight(self, preflight_id: str, **kwargs: Any) -> dict[str, Any]:
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return {"status": "scanning", "can_start": False, "preflight_id": preflight_id}
+            return {
+                "status": "ready",
+                "can_start": True,
+                "spec_hash": "sha256:abc",
+                "preflight_id": preflight_id,
+                "issues": [],
+            }
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("hextile_mcp.time.sleep", lambda s: sleeps.append(s))
+    server = HextileMcpServer(client=FakeClient())  # type: ignore[arg-type]
+    result = server.call_tool("get_batch_preflight", {"preflight_id": "pf1"})
+    assert result["isError"] is False
+    body = json.loads(result["content"][0]["text"])
+    assert body["status"] == "ready"
+    assert body["spec_hash"] == "sha256:abc"
+    assert calls["n"] == 3
+    assert sleeps == [2.0, 4.0]
+
+
+def test_batch_activity_omits_run_id() -> None:
+    posted: list[dict[str, Any]] = []
+
+    class FakeClient:
+        def start_batch(self, **kwargs: Any) -> dict[str, Any]:
+            return {"job_id": "01Jbatch", "run_id": "01Jbatch", "status": "queued"}
+
+        def post_activity(self, envelope: dict[str, Any]) -> None:
+            posted.append(envelope)
+
+        def cancel_batch(self, job_id: str, **kwargs: Any) -> dict[str, Any]:
+            return {"job_id": job_id, "run_id": job_id, "status": "cancelled"}
+
+    server = HextileMcpServer(client=FakeClient())  # type: ignore[arg-type]
+    ok = server.call_tool(
+        "start_batch",
+        {
+            "preflight_id": "pf1",
+            "spec_hash": "sha256:abc",
+            "idempotency_key": "k1",
+        },
+    )
+    assert ok["isError"] is False
+    phases = [e["phase"] for e in posted]
+    assert "started" in phases and "succeeded" in phases
+    for envelope in posted:
+        assert envelope["tool"] == "start_batch"
+        assert "run" not in envelope
+    posted.clear()
+    cancelled = server.call_tool(
+        "cancel_batch",
+        {"job_id": "01Jbatch", "idempotency_key": "k2", "expected_revision": 1},
+    )
+    assert cancelled["isError"] is False
+    assert any(e["phase"] == "cancelled" for e in posted)
+    for envelope in posted:
+        assert "run" not in envelope
 
 
 def test_py_files_compile() -> None:

@@ -25,6 +25,16 @@ UPGRADE_MSG = (
     "Upgrade 360 Hextile (needs workflows/run). "
     "This plugin requires a build with POST /api/workflows/run."
 )
+BATCH_UNAVAILABLE_MSG = (
+    "Batch workflows are unavailable. Enable Batch in 360 Hextile "
+    "(HEXTILE_BATCH_WORKFLOWS_ENABLED), then retry."
+)
+_BATCH_KNOWN_404 = (
+    "unknown_preflight",
+    "unknown_job",
+    "unknown_workflow",
+    "preview_unavailable",
+)
 
 _ERROR_BODY_SNIPPET = 800
 
@@ -129,6 +139,22 @@ class Client:
                     body=snippet,
                     kind="upgrade",
                 ) from exc
+            if "/api/batch-workflows" in path:
+                blob = snippet.lower()
+                if exc.code == 409 and "batch_unavailable" in blob:
+                    raise HextileClientError(
+                        BATCH_UNAVAILABLE_MSG,
+                        status_code=409,
+                        body=snippet,
+                        kind="capability",
+                    ) from exc
+                if exc.code == 404 and not any(code in blob for code in _BATCH_KNOWN_404):
+                    raise HextileClientError(
+                        BATCH_UNAVAILABLE_MSG,
+                        status_code=404,
+                        body=snippet,
+                        kind="capability",
+                    ) from exc
             raise HextileClientError(
                 f"HTTP {exc.code} {method} {path}: {snippet}",
                 status_code=exc.code,
@@ -485,6 +511,215 @@ class Client:
             return out
         return {"catalog_status": status, "note": note}
 
+    # ── batch workflows (thin HTTP; no Batch UUID in Render activity) ──
+
+    def preflight_batch(self, body: Mapping[str, Any]) -> Any:
+        """POST /api/batch-workflows/preflight — returns promptly (scan is async)."""
+        if not isinstance(body, Mapping):
+            raise HextileClientError(
+                "preflight body must be a JSON object",
+                status_code=None,
+                kind="other",
+            )
+        return self.post_json(
+            "/api/batch-workflows/preflight",
+            dict(body),
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
+    def get_batch_preflight(
+        self,
+        preflight_id: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Any:
+        """GET /api/batch-workflows/preflights/{id}?cursor=&limit=."""
+        if not preflight_id:
+            raise HextileClientError(
+                "preflight_id is required", status_code=None, kind="other"
+            )
+        pid = urllib.parse.quote(str(preflight_id), safe="")
+        params: dict[str, Any] = {}
+        if cursor:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = int(limit)
+        return self.get_json(
+            f"/api/batch-workflows/preflights/{pid}",
+            params=params or None,
+        )
+
+    def start_batch(
+        self,
+        *,
+        preflight_id: str,
+        spec_hash: str,
+        idempotency_key: str,
+    ) -> Any:
+        """POST /api/batch-workflows {preflight_id, spec_hash, idempotency_key}."""
+        if not preflight_id or not spec_hash or not idempotency_key:
+            raise HextileClientError(
+                "preflight_id, spec_hash, and idempotency_key are required",
+                status_code=None,
+                kind="other",
+            )
+        return self.post_json(
+            "/api/batch-workflows",
+            {
+                "preflight_id": str(preflight_id),
+                "spec_hash": str(spec_hash),
+                "idempotency_key": str(idempotency_key),
+            },
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
+    def list_batches(
+        self,
+        *,
+        status: Optional[str] = None,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Any:
+        """GET /api/batch-workflows?status=&cursor=&limit=."""
+        params: dict[str, Any] = {}
+        if status:
+            params["status"] = status
+        if cursor:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = int(limit)
+        return self.get_json("/api/batch-workflows", params=params or None)
+
+    def get_batch(self, job_id: str) -> Any:
+        """GET /api/batch-workflows/{job_id}."""
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        jid = urllib.parse.quote(str(job_id), safe="")
+        return self.get_json(f"/api/batch-workflows/{jid}")
+
+    def get_batch_items(
+        self,
+        job_id: str,
+        *,
+        outcome: Optional[str] = None,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Any:
+        """GET /api/batch-workflows/{job_id}/items?outcome=&cursor=&limit=."""
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        jid = urllib.parse.quote(str(job_id), safe="")
+        params: dict[str, Any] = {}
+        if outcome:
+            params["outcome"] = outcome
+        if cursor:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = int(limit)
+        return self.get_json(
+            f"/api/batch-workflows/{jid}/items",
+            params=params or None,
+        )
+
+    def pause_batch(
+        self, job_id: str, *, idempotency_key: str, expected_revision: int
+    ) -> Any:
+        """POST /api/batch-workflows/{job_id}/pause."""
+        return self._batch_control(job_id, "pause", idempotency_key, expected_revision)
+
+    def resume_batch(
+        self, job_id: str, *, idempotency_key: str, expected_revision: int
+    ) -> Any:
+        """POST /api/batch-workflows/{job_id}/resume."""
+        return self._batch_control(job_id, "resume", idempotency_key, expected_revision)
+
+    def cancel_batch(
+        self, job_id: str, *, idempotency_key: str, expected_revision: int
+    ) -> Any:
+        """POST /api/batch-workflows/{job_id}/cancel."""
+        return self._batch_control(job_id, "cancel", idempotency_key, expected_revision)
+
+    def retry_batch(
+        self, job_id: str, *, idempotency_key: str, expected_revision: int
+    ) -> Any:
+        """POST /api/batch-workflows/{job_id}/retry-failed."""
+        return self._batch_control(
+            job_id, "retry-failed", idempotency_key, expected_revision
+        )
+
+    def import_batch_outputs(
+        self,
+        job_id: str,
+        *,
+        idempotency_key: str,
+        expected_revision: int,
+        scope: Optional[str] = None,
+        item_ids: Optional[list[str]] = None,
+    ) -> Any:
+        """POST /api/batch-workflows/{job_id}/import — published outputs only."""
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        if not idempotency_key:
+            raise HextileClientError(
+                "idempotency_key is required", status_code=None, kind="other"
+            )
+        body: dict[str, Any] = {
+            "idempotency_key": str(idempotency_key),
+            "expected_revision": int(expected_revision),
+        }
+        if item_ids is not None and scope is not None:
+            raise HextileClientError(
+                "import accepts either scope or item_ids",
+                status_code=None,
+                kind="other",
+            )
+        if item_ids is not None:
+            if len(item_ids) > 500:
+                raise HextileClientError(
+                    "at most 500 item ids", status_code=None, kind="other"
+                )
+            body["item_ids"] = [str(i) for i in item_ids]
+        else:
+            body["scope"] = str(scope or "all_published")
+        jid = urllib.parse.quote(str(job_id), safe="")
+        return self.post_json(
+            f"/api/batch-workflows/{jid}/import",
+            body,
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
+    def _batch_control(
+        self,
+        job_id: str,
+        action: str,
+        idempotency_key: str,
+        expected_revision: int,
+    ) -> Any:
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        if not idempotency_key:
+            raise HextileClientError(
+                "idempotency_key is required", status_code=None, kind="other"
+            )
+        jid = urllib.parse.quote(str(job_id), safe="")
+        return self.post_json(
+            f"/api/batch-workflows/{jid}/{action}",
+            {
+                "idempotency_key": str(idempotency_key),
+                "expected_revision": int(expected_revision),
+            },
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
     # ── handshake (OPEN-3) ──────────────────────────────────────────────
 
     def probe(self) -> dict[str, Any]:
@@ -538,10 +773,13 @@ class Client:
 def error_payload(exc: BaseException) -> dict[str, Any]:
     """Stable tool-result shaped error for MCP content."""
     if isinstance(exc, HextileClientError):
-        return {
+        payload: dict[str, Any] = {
             "ok": False,
             "error": str(exc),
             "kind": exc.kind,
             "status_code": exc.status_code,
         }
+        if exc.kind == "capability":
+            payload["code"] = "batch_unavailable"
+        return payload
     return {"ok": False, "error": str(exc), "kind": "other"}

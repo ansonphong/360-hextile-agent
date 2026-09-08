@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v0.3.0 tools (28): catalog + persist + run + monitor + config + seed + models + guides + live context + live apply + sequences.
+v0.3.0 tools (39): catalog + persist + run + monitor + config + seed + models + guides + live context + live apply + sequences + batch.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 import traceback
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -65,6 +66,17 @@ TOOL_NAMES = (
     "get_sequence",
     "list_sequences",
     "stop_sequence",
+    "preflight_batch",
+    "get_batch_preflight",
+    "start_batch",
+    "list_batches",
+    "get_batch",
+    "get_batch_items",
+    "pause_batch",
+    "resume_batch",
+    "cancel_batch",
+    "retry_batch",
+    "import_batch_outputs",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -86,6 +98,10 @@ _READ_ONLY = frozenset(
         "get_guide",
         "get_sequence",
         "list_sequences",
+        "get_batch_preflight",
+        "list_batches",
+        "get_batch",
+        "get_batch_items",
     }
 )
 _MUTATING = frozenset(
@@ -102,8 +118,42 @@ _MUTATING = frozenset(
         "create_sequence",
         "start_sequence",
         "stop_sequence",
+        "preflight_batch",
+        "start_batch",
+        "pause_batch",
+        "resume_batch",
+        "cancel_batch",
+        "retry_batch",
+        "import_batch_outputs",
     }
 )
+_BATCH_TOOLS = frozenset(
+    {
+        "preflight_batch",
+        "get_batch_preflight",
+        "start_batch",
+        "list_batches",
+        "get_batch",
+        "get_batch_items",
+        "pause_batch",
+        "resume_batch",
+        "cancel_batch",
+        "retry_batch",
+        "import_batch_outputs",
+    }
+)
+_DESTRUCTIVE = frozenset(
+    {
+        "cancel_run",
+        "cancel_seed",
+        "delete_workflow",
+        "stop_sequence",
+        "cancel_batch",
+    }
+)
+PREFLIGHT_POLL_TIMEOUT_S = 60.0
+PREFLIGHT_POLL_INTERVAL_S = 2.0
+PREFLIGHT_POLL_BACKOFF_CAP_S = 10.0
 
 GUIDE_NAMES = (
     "workflow-schema",
@@ -117,7 +167,7 @@ _GUIDE_ROOT = Path(__file__).resolve().parent.parent / "skills" / "hextile" / "r
 def _annotations(name: str) -> dict[str, bool]:
     if name in _READ_ONLY:
         return {"readOnlyHint": True, "destructiveHint": False}
-    if name in {"cancel_run", "cancel_seed", "delete_workflow", "stop_sequence"}:
+    if name in _DESTRUCTIVE:
         return {"readOnlyHint": False, "destructiveHint": True}
     return {"readOnlyHint": False, "destructiveHint": False}
 
@@ -602,10 +652,267 @@ TOOLS: list[dict[str, Any]] = [
         },
         required=["sequence_id"],
     ),
+    _tool_def(
+        "preflight_batch",
+        "Create a Batch preflight (POST /api/batch-workflows/preflight). "
+        "Returns promptly; poll get_batch_preflight for spec_hash and issues. "
+        "Does not start GPU work. Paths are APP filesystem paths, not the MCP host.",
+        {
+            "idempotency_key": {
+                "type": "string",
+                "description": "Client request UUID (idempotent create)",
+            },
+            "workflow": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": (
+                    "kind=document + document, or kind=catalog + id + origin "
+                    "(builtin|user|project)"
+                ),
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["document", "catalog"],
+                    },
+                    "document": {
+                        "type": "object",
+                        "description": "Full hextile.workflow document",
+                    },
+                    "id": {"type": "string", "description": "Catalog workflow id"},
+                    "origin": {
+                        "type": "string",
+                        "enum": ["builtin", "user", "project"],
+                    },
+                },
+                "required": ["kind"],
+            },
+            "input": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "kind=folder + path, or kind=files + paths[]",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["folder", "files"]},
+                    "path": {"type": "string", "description": "Folder path (kind=folder)"},
+                    "recursive": {"type": "boolean", "default": True},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "preserve_relative_dirs": {"type": "boolean", "default": True},
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Explicit file list (kind=files)",
+                    },
+                },
+                "required": ["kind"],
+            },
+            "output": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "directory": {"type": "string"},
+                    "format": {"type": "string", "description": "png | jpg | …"},
+                    "name_pattern": {
+                        "type": "string",
+                        "default": "{stem}",
+                        "description": "Tokens: {stem} {index} {workflow}",
+                    },
+                    "collision": {
+                        "type": "string",
+                        "enum": ["skip", "fail", "version", "overwrite"],
+                        "default": "skip",
+                    },
+                },
+                "required": ["directory", "format"],
+            },
+            "loss_policy": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "allow_alpha_drop": {"type": "boolean", "default": False},
+                    "allow_bit_depth_drop": {"type": "boolean", "default": False},
+                    "allow_hdr_to_ldr": {"type": "boolean", "default": False},
+                    "allow_metadata_drop": {"type": "boolean", "default": False},
+                    "allow_color_profile_drop": {"type": "boolean", "default": False},
+                },
+            },
+            "source_verification": {
+                "type": "string",
+                "enum": ["stat", "sha256"],
+                "default": "stat",
+            },
+            "failure_policy": {
+                "type": "string",
+                "enum": ["continue", "stop"],
+                "default": "continue",
+            },
+            "library_import": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "enabled": {"type": "boolean", "default": False},
+                },
+            },
+            "supersedes_preflight_id": {
+                "type": "string",
+                "description": "Replace an existing ready draft",
+            },
+        },
+        required=["idempotency_key", "workflow", "input", "output"],
+    ),
+    _tool_def(
+        "get_batch_preflight",
+        "Poll GET /api/batch-workflows/preflights/{id} until scanning ends "
+        "(ready|failed|expired). Returns spec_hash, can_start, paged issues. "
+        "Read-only. Default page 100, max 500.",
+        {
+            "preflight_id": {
+                "type": "string",
+                "description": "Preflight id from preflight_batch",
+            },
+            "cursor": {"type": "string", "description": "Issue-page cursor"},
+            "limit": {
+                "type": "integer",
+                "description": "Page size (1–500, default 100)",
+                "minimum": 1,
+                "maximum": 500,
+                "default": 100,
+            },
+        },
+        required=["preflight_id"],
+    ),
+    _tool_def(
+        "start_batch",
+        "Queue a Batch job from a ready preflight "
+        "(POST /api/batch-workflows). Does not rescan. "
+        "Requires matching spec_hash. Never apply this recipe to the studio.",
+        {
+            "preflight_id": {"type": "string"},
+            "spec_hash": {
+                "type": "string",
+                "description": "spec_hash from get_batch_preflight",
+            },
+            "idempotency_key": {"type": "string"},
+        },
+        required=["preflight_id", "spec_hash", "idempotency_key"],
+    ),
+    _tool_def(
+        "list_batches",
+        "List Batch jobs (GET /api/batch-workflows). Read-only. "
+        "Default page 100, max 500. Not list_runs — Batch IDs are not Render IDs.",
+        {
+            "status": {"type": "string", "description": "Optional job status filter"},
+            "cursor": {"type": "string"},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500,
+                "default": 100,
+            },
+        },
+    ),
+    _tool_def(
+        "get_batch",
+        "Read one Batch job (GET /api/batch-workflows/{job_id}). Read-only. "
+        "Never pass job_id to get_status.",
+        {
+            "job_id": {"type": "string", "description": "Opaque Batch job id"},
+        },
+        required=["job_id"],
+    ),
+    _tool_def(
+        "get_batch_items",
+        "Page Batch item attempts (GET /api/batch-workflows/{job_id}/items). "
+        "Read-only. Default page 100, max 500.",
+        {
+            "job_id": {"type": "string"},
+            "outcome": {"type": "string", "description": "Optional outcome filter"},
+            "cursor": {"type": "string"},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500,
+                "default": 100,
+            },
+        },
+        required=["job_id"],
+    ),
+    _tool_def(
+        "pause_batch",
+        "Durably request pause (POST /api/batch-workflows/{job_id}/pause). "
+        "Active item finishes and publishes first.",
+        {
+            "job_id": {"type": "string"},
+            "idempotency_key": {"type": "string"},
+            "expected_revision": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Optimistic job revision",
+            },
+        },
+        required=["job_id", "idempotency_key", "expected_revision"],
+    ),
+    _tool_def(
+        "resume_batch",
+        "Resume a paused Batch job (POST /api/batch-workflows/{job_id}/resume). "
+        "Same frozen recipe. Captured project must be active.",
+        {
+            "job_id": {"type": "string"},
+            "idempotency_key": {"type": "string"},
+            "expected_revision": {"type": "integer", "minimum": 0},
+        },
+        required=["job_id", "idempotency_key", "expected_revision"],
+    ),
+    _tool_def(
+        "cancel_batch",
+        "Cancel a Batch job (POST /api/batch-workflows/{job_id}/cancel). "
+        "Destructive and terminal. Published outputs stay. Not cancel_run.",
+        {
+            "job_id": {"type": "string"},
+            "idempotency_key": {"type": "string"},
+            "expected_revision": {"type": "integer", "minimum": 0},
+        },
+        required=["job_id", "idempotency_key", "expected_revision"],
+    ),
+    _tool_def(
+        "retry_batch",
+        "Retry failed/interrupted items (POST /api/batch-workflows/{job_id}/retry-failed). "
+        "Same job and workflow hash. Cancelled jobs cannot retry.",
+        {
+            "job_id": {"type": "string"},
+            "idempotency_key": {"type": "string"},
+            "expected_revision": {"type": "integer", "minimum": 0},
+        },
+        required=["job_id", "idempotency_key", "expected_revision"],
+    ),
+    _tool_def(
+        "import_batch_outputs",
+        "Import published Batch outputs into the Library "
+        "(POST /api/batch-workflows/{job_id}/import). No GPU. "
+        "scope=all_published or item_ids (at most 500), not both.",
+        {
+            "job_id": {"type": "string"},
+            "idempotency_key": {"type": "string"},
+            "expected_revision": {"type": "integer", "minimum": 0},
+            "scope": {
+                "type": "string",
+                "enum": ["all_published"],
+                "description": "Import all published items (default when item_ids omitted)",
+            },
+            "item_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 500,
+                "description": "Specific published item ids (max 500)",
+            },
+        },
+        required=["job_id", "idempotency_key", "expected_revision"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
+assert len(TOOL_NAMES) == 39
+assert _BATCH_TOOLS <= set(TOOL_NAMES)
+assert _DESTRUCTIVE <= _MUTATING
 
 
 def load_guide(name: str) -> dict[str, Any]:
@@ -718,6 +1025,17 @@ class HextileMcpServer:
             "get_sequence": self._get_sequence,
             "list_sequences": self._list_sequences,
             "stop_sequence": self._stop_sequence,
+            "preflight_batch": self._preflight_batch,
+            "get_batch_preflight": self._get_batch_preflight,
+            "start_batch": self._start_batch,
+            "list_batches": self._list_batches,
+            "get_batch": self._get_batch,
+            "get_batch_items": self._get_batch_items,
+            "pause_batch": self._pause_batch,
+            "resume_batch": self._resume_batch,
+            "cancel_batch": self._cancel_batch,
+            "retry_batch": self._retry_batch,
+            "import_batch_outputs": self._import_batch_outputs,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -819,14 +1137,21 @@ class HextileMcpServer:
             data = handler(args)
             phase = (
                 "cancelled"
-                if name in ("cancel_run", "cancel_seed", "stop_sequence")
+                if name in (
+                    "cancel_run",
+                    "cancel_seed",
+                    "stop_sequence",
+                    "cancel_batch",
+                )
                 else "succeeded"
             )
+            # Batch IDs must never enter run.run_id (Render activity consumers).
+            run = None if name in _BATCH_TOOLS else _run_from_payload(data)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
                 phase=phase,
-                run=_run_from_payload(data),
+                run=run,
                 overrides_keys=overrides_keys,
             )
             return _ok_result(data)
@@ -1264,6 +1589,144 @@ class HextileMcpServer:
                 "sequence_id is required", status_code=None, kind="other"
             )
         return self.client.stop_sequence(str(sequence_id))
+
+    def _preflight_batch(self, args: dict[str, Any]) -> Any:
+        for key in ("idempotency_key", "workflow", "input", "output"):
+            if key not in args:
+                raise HextileClientError(
+                    f"{key} is required", status_code=None, kind="other"
+                )
+        body = {
+            "idempotency_key": str(args["idempotency_key"]),
+            "workflow": args["workflow"],
+            "input": args["input"],
+            "output": args["output"],
+        }
+        for key in (
+            "loss_policy",
+            "source_verification",
+            "failure_policy",
+            "library_import",
+            "supersedes_preflight_id",
+        ):
+            if key in args:
+                body[key] = args[key]
+        return self.client.preflight_batch(body)
+
+    def _get_batch_preflight(self, args: dict[str, Any]) -> Any:
+        preflight_id = args.get("preflight_id")
+        if not preflight_id:
+            raise HextileClientError(
+                "preflight_id is required", status_code=None, kind="other"
+            )
+        cursor = args.get("cursor")
+        limit = args.get("limit")
+        deadline = time.monotonic() + PREFLIGHT_POLL_TIMEOUT_S
+        delay = PREFLIGHT_POLL_INTERVAL_S
+        while True:
+            data = self.client.get_batch_preflight(
+                str(preflight_id),
+                cursor=str(cursor) if cursor else None,
+                limit=int(limit) if limit is not None else None,
+            )
+            status = data.get("status") if isinstance(data, Mapping) else None
+            if status != "scanning" or time.monotonic() >= deadline:
+                return data
+            time.sleep(delay)
+            delay = min(delay * 2, PREFLIGHT_POLL_BACKOFF_CAP_S)
+
+    def _start_batch(self, args: dict[str, Any]) -> Any:
+        return self.client.start_batch(
+            preflight_id=str(args.get("preflight_id") or ""),
+            spec_hash=str(args.get("spec_hash") or ""),
+            idempotency_key=str(args.get("idempotency_key") or ""),
+        )
+
+    def _list_batches(self, args: dict[str, Any]) -> Any:
+        limit = args.get("limit")
+        return self.client.list_batches(
+            status=str(args["status"]) if args.get("status") else None,
+            cursor=str(args["cursor"]) if args.get("cursor") else None,
+            limit=int(limit) if limit is not None else None,
+        )
+
+    def _get_batch(self, args: dict[str, Any]) -> Any:
+        job_id = args.get("job_id")
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        return self.client.get_batch(str(job_id))
+
+    def _get_batch_items(self, args: dict[str, Any]) -> Any:
+        job_id = args.get("job_id")
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        limit = args.get("limit")
+        return self.client.get_batch_items(
+            str(job_id),
+            outcome=str(args["outcome"]) if args.get("outcome") else None,
+            cursor=str(args["cursor"]) if args.get("cursor") else None,
+            limit=int(limit) if limit is not None else None,
+        )
+
+    def _pause_batch(self, args: dict[str, Any]) -> Any:
+        return self._batch_control(self.client.pause_batch, args)
+
+    def _resume_batch(self, args: dict[str, Any]) -> Any:
+        return self._batch_control(self.client.resume_batch, args)
+
+    def _cancel_batch(self, args: dict[str, Any]) -> Any:
+        return self._batch_control(self.client.cancel_batch, args)
+
+    def _retry_batch(self, args: dict[str, Any]) -> Any:
+        return self._batch_control(self.client.retry_batch, args)
+
+    def _batch_control(self, method: Callable[..., Any], args: dict[str, Any]) -> Any:
+        job_id = args.get("job_id")
+        key = args.get("idempotency_key")
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        if not key:
+            raise HextileClientError(
+                "idempotency_key is required", status_code=None, kind="other"
+            )
+        if "expected_revision" not in args:
+            raise HextileClientError(
+                "expected_revision is required", status_code=None, kind="other"
+            )
+        return method(
+            str(job_id),
+            idempotency_key=str(key),
+            expected_revision=int(args["expected_revision"]),
+        )
+
+    def _import_batch_outputs(self, args: dict[str, Any]) -> Any:
+        job_id = args.get("job_id")
+        key = args.get("idempotency_key")
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        if not key:
+            raise HextileClientError(
+                "idempotency_key is required", status_code=None, kind="other"
+            )
+        if "expected_revision" not in args:
+            raise HextileClientError(
+                "expected_revision is required", status_code=None, kind="other"
+            )
+        return self.client.import_batch_outputs(
+            str(job_id),
+            idempotency_key=str(key),
+            expected_revision=int(args["expected_revision"]),
+            scope=str(args["scope"]) if args.get("scope") else None,
+            item_ids=list(args["item_ids"]) if args.get("item_ids") is not None else None,
+        )
 
     @staticmethod
     def _response(msg_id: Any, result: Any) -> dict[str, Any]:

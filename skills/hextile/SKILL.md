@@ -1,6 +1,6 @@
 ---
 name: hextile
-description: "Drive 360 Hextile workflows from an AI coding agent. Use when generating 360° panoramas, listing or saving workflow templates, overriding prompts, dry-run validation, 360-LoRA seeds, polling or listing renders, or reading bundled automation guides."
+description: "Drive 360 Hextile workflows from an AI coding agent. Use when generating 360° panoramas, listing or saving workflow templates, overriding prompts, dry-run validation, 360-LoRA seeds, polling or listing renders, Batch jobs over many local images, or reading bundled automation guides."
 ---
 
 # 360 Hextile — Agent Skill
@@ -73,6 +73,17 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_sequence` | Poll `sequence_id` progress / output (not `get_status`) | no |
 | `list_sequences` | Find sequences if you lost `sequence_id` | no |
 | `stop_sequence` | Kill a running sequence | **yes** |
+| `preflight_batch` | Strict Batch preflight over a frozen workflow + folder/files | **yes** |
+| `get_batch_preflight` | Poll preflight until ready/failed/expired; get spec_hash | no |
+| `start_batch` | Queue a Batch job from a ready preflight (not run_workflow) | **yes** |
+| `list_batches` | List Batch jobs (not list_runs) | no |
+| `get_batch` | Poll one Batch job (never pass job_id to get_status) | no |
+| `get_batch_items` | Page Batch item attempts | no |
+| `pause_batch` | Pause after the current item publishes | **yes** |
+| `resume_batch` | Resume a paused Batch job (same frozen recipe) | **yes** |
+| `cancel_batch` | Terminal cancel; keep published files (not cancel_run) | **yes** |
+| `retry_batch` | Retry failed/interrupted items on the same job | **yes** |
+| `import_batch_outputs` | Import published outputs into the Library (no GPU) | **yes** |
 
 ### Selection guide
 
@@ -85,6 +96,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 7. **Run** → `run_workflow` → keep `run_id` → `get_status` until terminal (`completed` / `failed` / `cancelled` / `crashed`). Use `list_runs` if the id is lost.
 8. **Save a variant** → `save_workflow` (`user`/`project`, **new** id). Create-only; 409 means pick another id.
 9. **Abort** → `cancel_run`.
+10. **Many local images, one frozen recipe** → `preflight_batch` → `get_batch_preflight` → `start_batch` (not `run_workflow`, not a Sequence). Poll `get_batch`. Abort with `cancel_batch`.
 
 ## Upres
 
@@ -198,7 +210,7 @@ curl -s -X POST http://127.0.0.1:8000/api/360-lora/generate \
 
 ## Not in this plugin
 
-`start_wizard`, `compile_config`, `describe_image`, `upscale_image`, `list_worlds`, `list_presets`, batch/fan-out, run-ledger resume, in-place workflow UPDATE, Pattern generate. Do not invent those tools.
+`start_wizard`, `compile_config`, `describe_image`, `upscale_image`, `list_worlds`, `list_presets`, run-ledger resume, in-place workflow UPDATE, Pattern generate. Do not invent those tools. Batch is the eleven `*_batch*` tools above — not `run_workflow` per file, not a Sequence, not `/api/batch-convert`. Never put a Batch job id into `get_status` / `cancel_run`.
 
 ## Min app version
 
