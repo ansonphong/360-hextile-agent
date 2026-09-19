@@ -314,12 +314,14 @@ def test_private_headers_are_request_local() -> None:
     ):
         client.run_workflow(workflow_id="quick-scout")
     client.run_workflow(workflow_id="quick-scout")
+    Client(opener=opener).run_workflow(workflow_id="quick-scout")
 
     assert seen[0]["x-hextile-copilot-token"] == "secret"
     assert seen[0]["x-hextile-op"] == "op-a"
     assert "x-hextile-agent" not in seen[0]
     assert "x-hextile-copilot-token" not in seen[1]
     assert "x-hextile-op" not in seen[1]
+    assert seen[2]["x-hextile-agent"] == "mcp"
 
 
 def test_save_workflow_rejects_builtin() -> None:
