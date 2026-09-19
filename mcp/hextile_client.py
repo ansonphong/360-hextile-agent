@@ -244,6 +244,33 @@ class Client:
         """GET /api/workflows/capabilities."""
         return self.get_json("/api/workflows/capabilities")
 
+    def get_unreal_export_catalog(self) -> Any:
+        return self.get_json("/api/renders/unreal-export/catalog")
+
+    def preflight_unreal_export(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        return self.post_json(f"/api/renders/{rid}/export/preflight", body)
+
+    def export_to_unreal_project(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        payload = dict(body)
+        payload.pop("destination", None)
+        try:
+            return self.post_json(
+                f"/api/renders/{rid}/export",
+                payload,
+                timeout=GENERATE_TIMEOUT_S,
+            )
+        except HextileClientError as exc:
+            if exc.kind == "app_down":
+                raise HextileClientError(
+                    "Connection ended; check the folder before retry.",
+                    status_code=exc.status_code,
+                    body=exc.body,
+                    kind="ue_outcome_unknown",
+                ) from exc
+            raise
+
     def apply_config_delta(
         self,
         *,

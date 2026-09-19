@@ -80,6 +80,9 @@ TOOL_NAMES = (
     "cancel_batch",
     "retry_batch",
     "import_batch_outputs",
+    "get_unreal_export_catalog",
+    "preflight_unreal_export",
+    "export_to_unreal_project",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -105,6 +108,8 @@ _READ_ONLY = frozenset(
         "list_batches",
         "get_batch",
         "get_batch_items",
+        "get_unreal_export_catalog",
+        "preflight_unreal_export",
     }
 )
 _MUTATING = frozenset(
@@ -128,6 +133,7 @@ _MUTATING = frozenset(
         "cancel_batch",
         "retry_batch",
         "import_batch_outputs",
+        "export_to_unreal_project",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -932,11 +938,57 @@ TOOLS: list[dict[str, Any]] = [
         },
         required=["job_id", "idempotency_key", "expected_revision"],
     ),
+    _tool_def(
+        "get_unreal_export_catalog",
+        "Read the Unreal export catalog (GET /api/renders/unreal-export/catalog). "
+        "Empty catalog is valid. Does not write Content.",
+        {},
+    ),
+    _tool_def(
+        "preflight_unreal_export",
+        "Advisory Unreal-project preflight. Same body as the Export modal. No writes.",
+        {
+            "render_id": {"type": "string"},
+            "projection": {"type": "string"},
+            "encoding": {"type": "string"},
+            "layout": {"type": "string"},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "pan": {"type": "number"},
+            "tilt": {"type": "number"},
+            "roll": {"type": "number"},
+            "source_node_id": {"type": "string"},
+            "hdri": {"type": "object"},
+            "unreal_project": {"type": "object"},
+        },
+        required=["render_id", "unreal_project"],
+    ),
+    _tool_def(
+        "export_to_unreal_project",
+        "Export one render into a paired Unreal project via POST /api/renders/{id}/export. "
+        "Requires actual Unreal Engine (HDRI) M1 state. Timeout 300s; one attempt. "
+        "Does not encode locally or write Content from the plugin.",
+        {
+            "render_id": {"type": "string"},
+            "projection": {"type": "string"},
+            "encoding": {"type": "string"},
+            "layout": {"type": "string"},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "pan": {"type": "number"},
+            "tilt": {"type": "number"},
+            "roll": {"type": "number"},
+            "source_node_id": {"type": "string"},
+            "hdri": {"type": "object"},
+            "unreal_project": {"type": "object"},
+        },
+        required=["render_id", "unreal_project"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 39
+assert len(TOOL_NAMES) == 42
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1065,6 +1117,9 @@ class HextileMcpServer:
             "cancel_batch": self._cancel_batch,
             "retry_batch": self._retry_batch,
             "import_batch_outputs": self._import_batch_outputs,
+            "get_unreal_export_catalog": self._get_unreal_export_catalog,
+            "preflight_unreal_export": self._preflight_unreal_export,
+            "export_to_unreal_project": self._export_to_unreal_project,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -1330,6 +1385,23 @@ class HextileMcpServer:
 
     def _get_capabilities(self, _args: dict[str, Any]) -> Any:
         return self.client.get_capabilities()
+
+    def _get_unreal_export_catalog(self, _args: dict[str, Any]) -> Any:
+        return self.client.get_unreal_export_catalog()
+
+    def _unreal_export_body(self, args: dict[str, Any]) -> dict[str, Any]:
+        body = dict(args)
+        body.pop("render_id", None)
+        body.pop("destination", None)
+        return body
+
+    def _preflight_unreal_export(self, args: dict[str, Any]) -> Any:
+        render_id = str(args.get("render_id") or "")
+        return self.client.preflight_unreal_export(render_id, self._unreal_export_body(args))
+
+    def _export_to_unreal_project(self, args: dict[str, Any]) -> Any:
+        render_id = str(args.get("render_id") or "")
+        return self.client.export_to_unreal_project(render_id, self._unreal_export_body(args))
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
 import json
@@ -93,13 +94,16 @@ EXPECTED_TOOLS = (
     "cancel_batch",
     "retry_batch",
     "import_batch_outputs",
+    "get_unreal_export_catalog",
+    "preflight_unreal_export",
+    "export_to_unreal_project",
 )
 
 
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 39
+    assert len(EXPECTED_TOOLS) == 42
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -138,6 +142,38 @@ def test_open4_annotations_partition() -> None:
     ):
         assert name in _MUTATING
     assert "cancel_batch" in _DESTRUCTIVE
+    assert "get_unreal_export_catalog" in _READ_ONLY
+    assert "preflight_unreal_export" in _READ_ONLY
+    assert "export_to_unreal_project" in _MUTATING
+
+
+def _names_from_assign(source: str, target: str) -> set[str]:
+    tree = ast.parse(source)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == target for t in node.targets):
+            continue
+        value = node.value
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "frozenset":
+            if value.args and isinstance(value.args[0], (ast.Set, ast.Tuple, ast.List)):
+                value = value.args[0]
+        if not isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+            continue
+        names: set[str] = set()
+        for elt in value.elts:
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                names.add(elt.value)
+        return names
+    raise AssertionError(f"{target} assign not found")
+
+
+def test_app_tool_names_ast_equals() -> None:
+    app_path = ROOT.parent / "360-HEXTILE-APP" / "backend" / "api" / "routes" / "agent_events.py"
+    assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
+    app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
+    assert set(TOOL_NAMES) == app_names
+    assert len(app_names) == 42
 
 
 def test_skill_tool_names_subset_of_mcp() -> None:

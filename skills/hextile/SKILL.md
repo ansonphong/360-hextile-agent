@@ -84,6 +84,9 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `cancel_batch` | Terminal cancel; keep published files (not cancel_run) | **yes** |
 | `retry_batch` | Retry failed/interrupted items on the same job | **yes** |
 | `import_batch_outputs` | Import published outputs into the Library (no GPU) | **yes** |
+| `get_unreal_export_catalog` | Read the Unreal export catalog (empty is valid) | no |
+| `preflight_unreal_export` | Advisory Unreal-project preflight (same body as the Export modal) | no |
+| `export_to_unreal_project` | Export HDR (+ optional masters) into a paired Unreal project. Requires APP Unreal-project sink and actual M1 state. 300s, one attempt | **yes** |
 
 ### Selection guide
 
