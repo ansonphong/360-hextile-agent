@@ -10,12 +10,14 @@ v0.3.0 tools (39): catalog + persist + run + monitor + config + seed + models + 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
 import traceback
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
@@ -35,6 +37,7 @@ PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
 SERVER_VERSION = "0.3.0"
 ACTIVITY_SCHEMA = "hextile.agent.activity.v1"
+CHILD_TOKEN_ENV = "HEXTILE_MCP_CHILD_TOKEN"
 
 # Canonical tool names — drift tests assert SKILL.md ⊆ this list.
 TOOL_NAMES = (
@@ -149,6 +152,29 @@ _DESTRUCTIVE = frozenset(
         "delete_workflow",
         "stop_sequence",
         "cancel_batch",
+    }
+)
+_CONTROL_TOOLS = frozenset(
+    {
+        "get_status",
+        "get_logs",
+        "get_sequence",
+        "get_batch",
+        "get_batch_items",
+        "cancel_run",
+        "cancel_seed",
+        "stop_sequence",
+        "cancel_batch",
+    }
+)
+_PRIVATE_ARGUMENT_KEYS = frozenset(
+    {
+        "actor",
+        "operation_id",
+        "hextile_op",
+        "token",
+        "x-hextile-copilot-token",
+        "x-hextile-op",
     }
 )
 PREFLIGHT_POLL_TIMEOUT_S = 60.0
@@ -992,8 +1018,11 @@ class HextileMcpServer:
         self,
         client: Optional[Client] = None,
         notify: Optional[Callable[[dict[str, Any]], None]] = None,
+        child_token: Optional[str] = None,
     ) -> None:
-        self.client = client or Client()
+        self.child_token = child_token if child_token is not None else os.environ.get(CHILD_TOKEN_ENV)
+        self.internal_mode = bool(self.child_token)
+        self.client = client or Client(internal_mode=self.internal_mode)
         self.notify = notify
         self.session_id: Optional[str] = None
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
@@ -1079,9 +1108,15 @@ class HextileMcpServer:
             arguments = params.get("arguments") or {}
             meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
             progress_token = meta.get("progressToken")
+            operation_id = meta.get("hextile_op")
+            if not isinstance(operation_id, str) or not operation_id:
+                operation_id = None
             try:
                 result = self.call_tool(
-                    name, arguments, progress_token=progress_token
+                    name,
+                    arguments,
+                    progress_token=progress_token,
+                    operation_id=operation_id,
                 )
             except Exception as exc:  # noqa: BLE001 — surface to agent
                 return self._response(
@@ -1107,9 +1142,13 @@ class HextileMcpServer:
         name: str,
         arguments: dict[str, Any],
         progress_token: Any = None,
+        operation_id: Optional[str] = None,
     ) -> dict[str, Any]:
         call_id = str(uuid.uuid4())
-        args = arguments if isinstance(arguments, dict) else {}
+        args = dict(arguments) if isinstance(arguments, dict) else {}
+        for key in tuple(args):
+            if key.lower() in _PRIVATE_ARGUMENT_KEYS:
+                args.pop(key, None)
         overrides_keys = _overrides_keys(name, args)
         self._emit_activity(
             tool=name, call_id=call_id, phase="started",
@@ -1134,7 +1173,16 @@ class HextileMcpServer:
         try:
             if name == "generate_seed":
                 self._notify_progress(progress_token, 0)
-            data = handler(args)
+            private_headers: dict[str, str] = {}
+            if self.internal_mode and operation_id:
+                private_headers = {
+                    "X-Hextile-Copilot-Token": str(self.child_token),
+                    "X-Hextile-Op": operation_id,
+                }
+            bind_headers = getattr(self.client, "request_headers", None)
+            header_context = bind_headers(private_headers) if bind_headers else nullcontext()
+            with header_context:
+                data = handler(args)
             phase = (
                 "cancelled"
                 if name in (
@@ -1204,6 +1252,8 @@ class HextileMcpServer:
         error: Optional[Mapping[str, Any]] = None,
         overrides_keys: Optional[list[str]] = None,
     ) -> None:
+        if self.internal_mode:
+            return
         # ids/phase only — never config/nav/tool_op/args. Timeout 1s; swallow.
         envelope: dict[str, Any] = {
             "schema": ACTIVITY_SCHEMA,
@@ -1794,6 +1844,9 @@ def main() -> int:
 
     # tools/call on one worker so generate_seed cannot starve ping.
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hextile-mcp")
+    control_executor = ThreadPoolExecutor(
+        max_workers=2, thread_name_prefix="hextile-mcp-control"
+    )
     pending_lock = threading.Lock()
     pending: list[Future[Any]] = []
 
@@ -1836,7 +1889,9 @@ def main() -> int:
                 pass
 
     def submit_tool(msg: dict[str, Any]) -> None:
-        fut = executor.submit(run_rpc, msg)
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        lane = control_executor if params.get("name") in _CONTROL_TOOLS else executor
+        fut = lane.submit(run_rpc, msg)
         with pending_lock:
             pending.append(fut)
         fut.add_done_callback(on_done)
@@ -1885,6 +1940,7 @@ def main() -> int:
                 _write_message(stdout, resp)
     finally:
         executor.shutdown(wait=True)
+        control_executor.shutdown(wait=True)
     return 0
 
 

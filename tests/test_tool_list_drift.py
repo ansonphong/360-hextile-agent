@@ -286,6 +286,42 @@ def test_mcp_initialize() -> None:
     assert "tools" in resp["result"]["capabilities"]
 
 
+def test_private_headers_are_request_local() -> None:
+    seen: list[dict[str, str]] = []
+
+    class _Resp:
+        status = 200
+
+        def read(self) -> bytes:
+            return b"{}"
+
+        def getcode(self) -> int:
+            return 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req, timeout=None):  # noqa: ANN001
+        seen.append({k.lower(): v for k, v in req.header_items()})
+        return _Resp()
+
+    client = Client(opener=opener, internal_mode=True)
+    with client.request_headers(
+        {"X-Hextile-Copilot-Token": "secret", "X-Hextile-Op": "op-a"}
+    ):
+        client.run_workflow(workflow_id="quick-scout")
+    client.run_workflow(workflow_id="quick-scout")
+
+    assert seen[0]["x-hextile-copilot-token"] == "secret"
+    assert seen[0]["x-hextile-op"] == "op-a"
+    assert "x-hextile-agent" not in seen[0]
+    assert "x-hextile-copilot-token" not in seen[1]
+    assert "x-hextile-op" not in seen[1]
+
+
 def test_save_workflow_rejects_builtin() -> None:
     client = Client(opener=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no HTTP")))
     with pytest.raises(HextileClientError) as ei:

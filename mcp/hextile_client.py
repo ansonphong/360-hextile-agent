@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import socket
+from contextlib import contextmanager
+from contextvars import ContextVar
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -37,6 +39,9 @@ _BATCH_KNOWN_404 = (
 )
 
 _ERROR_BODY_SNIPPET = 800
+_REQUEST_HEADERS: ContextVar[Mapping[str, str]] = ContextVar(
+    "hextile_request_headers", default={}
+)
 
 
 class HextileClientError(RuntimeError):
@@ -65,11 +70,22 @@ class Client:
         *,
         timeout: float = DEFAULT_TIMEOUT_S,
         opener: Any = None,
+        internal_mode: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         # Injectable for tests (callable urlopen or opener.open).
         self._opener = opener
+        self.internal_mode = internal_mode
+
+    @contextmanager
+    def request_headers(self, headers: Mapping[str, str]):
+        """Bind private headers to one tools/call execution context."""
+        token = _REQUEST_HEADERS.set(dict(headers))
+        try:
+            yield
+        finally:
+            _REQUEST_HEADERS.reset(token)
 
     # ── low-level ───────────────────────────────────────────────────────
 
@@ -92,7 +108,7 @@ class Client:
             if qs:
                 url = url + ("&" if "?" in url else "?") + qs
         data: Optional[bytes] = None
-        req_headers = {"Accept": "application/json"}
+        req_headers = {"Accept": "application/json", **_REQUEST_HEADERS.get()}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             req_headers["Content-Type"] = "application/json"
@@ -347,7 +363,7 @@ class Client:
         return self.post_json(
             "/api/workflows/run",
             body,
-            headers={"X-Hextile-Agent": "mcp"},
+            headers=None if self.internal_mode else {"X-Hextile-Agent": "mcp"},
         )
 
     def dry_run_workflow(self, **kwargs: Any) -> Any:
