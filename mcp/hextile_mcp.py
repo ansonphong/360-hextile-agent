@@ -4,7 +4,7 @@
 JSON-RPC 2.0 over newline-delimited stdin/stdout.
 Talks only to http://127.0.0.1:8000. No app logic, no local merge authority.
 
-v0.3.0 tools (39): catalog + persist + run + monitor + config + seed + models + guides + live context + live apply + sequences + batch.
+Catalog + persist + run + monitor + config + seed + models + guides + live context + live apply + sequences + batch.
 """
 
 from __future__ import annotations
@@ -57,6 +57,7 @@ TOOL_NAMES = (
     "cancel_run",
     "retry_run",
     "generate_seed",
+    "get_seed_job",
     "list_seed_history",
     "get_seed_batch",
     "cancel_seed",
@@ -98,6 +99,7 @@ _READ_ONLY = frozenset(
         "get_logs",
         "list_runs",
         "list_seed_history",
+        "get_seed_job",
         "get_seed_batch",
         "list_360_loras",
         "list_installed_models",
@@ -163,6 +165,7 @@ _DESTRUCTIVE = frozenset(
 _CONTROL_TOOLS = frozenset(
     {
         "get_status",
+        "get_seed_job",
         "get_logs",
         "get_sequence",
         "get_batch",
@@ -469,10 +472,15 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "generate_seed",
-        "Generate 360-LoRA equirect seed image(s). Returns variation paths. "
-        "Two-step: pick a path, then run_workflow with overrides "
-        "{input: {path, source: 'file'}}. Requires lora_path + base_model.",
+        "Submit one 360-LoRA seed job with a caller-supplied UUID. Returns a "
+        "short acknowledgement with job_id; poll get_seed_job for original-index "
+        "variation paths, seeds, and terminal errors.",
         {
+            "request_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Caller-supplied canonical UUID; reuse it with the same body after an uncertain acknowledgement",
+            },
             "prompt": {"type": "string", "description": "Generation prompt"},
             "lora_path": {
                 "type": "string",
@@ -522,12 +530,21 @@ TOOLS: list[dict[str, Any]] = [
                 "description": "Circular X-padding for horizontal seam",
             },
         },
-        required=["prompt", "lora_path", "base_model"],
+        required=["request_id", "prompt", "lora_path", "base_model"],
+    ),
+    _tool_def(
+        "get_seed_job",
+        "Read one exact 360-LoRA job (GET /api/360-lora/jobs/{job_id}). "
+        "Returns status, progress, original-index completed variations with "
+        "paths and seeds, variation errors, and typed terminal error.",
+        {
+            "job_id": {"type": "string", "description": "Job id from generate_seed"},
+        },
+        required=["job_id"],
     ),
     _tool_def(
         "list_seed_history",
-        "List 360-LoRA seed batches (GET /api/360-lora/history). "
-        "Recover variation paths after the 300s generate_seed timeout. "
+        "List stored 360-LoRA seed batches (GET /api/360-lora/history). "
         "Always sends offset+limit so APP returns {batches, total}.",
         {
             "offset": {
@@ -549,8 +566,7 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "get_seed_batch",
-        "Read one 360-LoRA seed batch (GET /api/360-lora/history/{batch_id}). "
-        "Recover after the 300s generate_seed timeout.",
+        "Read one stored 360-LoRA seed batch (GET /api/360-lora/history/{batch_id}).",
         {
             "batch_id": {
                 "type": "string",
@@ -561,10 +577,12 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "cancel_seed",
-        "Stop the live 360-LoRA job (POST /api/360-lora/cancel). "
-        "Cancels whatever seed is live — no batch id, global. "
-        "Not a render — use cancel_run for renders.",
-        {},
+        "Cancel only the named 360-LoRA job (POST /api/360-lora/jobs/{job_id}/cancel). "
+        "Use cancel_run for renders.",
+        {
+            "job_id": {"type": "string", "description": "Exact seed job id to cancel"},
+        },
+        required=["job_id"],
     ),
     _tool_def(
         "list_360_loras",
@@ -988,7 +1006,7 @@ TOOLS: list[dict[str, Any]] = [
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 42
+assert len(TOOL_NAMES) == 43
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1055,6 +1073,19 @@ def _run_from_payload(payload: Any) -> Optional[dict[str, Any]]:
     return None
 
 
+def _seed_activity(name: str, args: Mapping[str, Any], payload: Any = None) -> Optional[dict[str, str]]:
+    """Keep a seed job's identity separate from Render run.run_id."""
+    if name not in ("generate_seed", "get_seed_job", "cancel_seed"):
+        return None
+    job_id = args.get("request_id" if name == "generate_seed" else "job_id")
+    if not isinstance(job_id, str) or not job_id:
+        return None
+    seed = {"job_id": job_id}
+    if isinstance(payload, Mapping) and payload.get("status") is not None:
+        seed["status"] = str(payload["status"])
+    return seed
+
+
 def _ok_result(data: Any) -> dict[str, Any]:
     text = data if isinstance(data, str) else json.dumps(data, indent=2, default=str)
     return {"content": [{"type": "text", "text": text}], "isError": False}
@@ -1094,6 +1125,7 @@ class HextileMcpServer:
             "cancel_run": self._cancel_run,
             "retry_run": self._retry_run,
             "generate_seed": self._generate_seed,
+            "get_seed_job": self._get_seed_job,
             "list_seed_history": self._list_seed_history,
             "get_seed_batch": self._get_seed_batch,
             "cancel_seed": self._cancel_seed,
@@ -1207,6 +1239,7 @@ class HextileMcpServer:
         overrides_keys = _overrides_keys(name, args)
         self._emit_activity(
             tool=name, call_id=call_id, phase="started",
+            seed=_seed_activity(name, args),
             overrides_keys=overrides_keys,
         )
         handler = self._handlers.get(name)
@@ -1242,19 +1275,19 @@ class HextileMcpServer:
                 "cancelled"
                 if name in (
                     "cancel_run",
-                    "cancel_seed",
                     "stop_sequence",
                     "cancel_batch",
                 )
                 else "succeeded"
             )
-            # Batch IDs must never enter run.run_id (Render activity consumers).
-            run = None if name in _BATCH_TOOLS else _run_from_payload(data)
+            # Batch and seed IDs must never enter run.run_id (Render consumers).
+            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") else _run_from_payload(data)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
                 phase=phase,
                 run=run,
+                seed=_seed_activity(name, args, data),
                 overrides_keys=overrides_keys,
             )
             return _ok_result(data)
@@ -1268,6 +1301,7 @@ class HextileMcpServer:
                     "status_code": exc.status_code,
                     "message": str(exc),
                 },
+                seed=_seed_activity(name, args),
                 overrides_keys=overrides_keys,
             )
             return _err_result(error_payload(exc))
@@ -1281,6 +1315,7 @@ class HextileMcpServer:
                     "status_code": None,
                     "message": str(exc),
                 },
+                seed=_seed_activity(name, args),
                 overrides_keys=overrides_keys,
             )
             return _err_result(
@@ -1304,6 +1339,7 @@ class HextileMcpServer:
         call_id: str,
         phase: str,
         run: Optional[Mapping[str, Any]] = None,
+        seed: Optional[Mapping[str, str]] = None,
         error: Optional[Mapping[str, Any]] = None,
         overrides_keys: Optional[list[str]] = None,
     ) -> None:
@@ -1325,6 +1361,8 @@ class HextileMcpServer:
                 run_body["status"] = str(run["status"])
             if run_body:
                 envelope["run"] = run_body
+        if seed:
+            envelope["seed"] = dict(seed)
         if error:
             status = error.get("status_code")
             # Body snippets echo config/override/prompt values — never on the bus.
@@ -1586,12 +1624,13 @@ class HextileMcpServer:
         return self.client.retry_run(str(run_id))
 
     def _generate_seed(self, args: dict[str, Any]) -> Any:
+        request_id = args.get("request_id")
         prompt = args.get("prompt")
         lora_path = args.get("lora_path")
         base_model = args.get("base_model")
-        if not prompt or not lora_path or not base_model:
+        if not request_id or not prompt or not lora_path or not base_model:
             raise HextileClientError(
-                "prompt, lora_path, and base_model are required",
+                "request_id, prompt, lora_path, and base_model are required",
                 status_code=None,
                 kind="other",
             )
@@ -1612,11 +1651,20 @@ class HextileMcpServer:
                 extra[key] = args[key]
         return self.client.generate_seed(
             str(prompt),
+            request_id=str(request_id),
             lora_path=str(lora_path),
             base_model=str(base_model),
             n=n,
             **extra,
         )
+
+    def _get_seed_job(self, args: dict[str, Any]) -> Any:
+        job_id = args.get("job_id")
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        return self.client.get_seed_job(str(job_id))
 
     def _list_seed_history(self, args: dict[str, Any]) -> Any:
         offset = 0 if args.get("offset") is None else int(args["offset"])
@@ -1636,8 +1684,13 @@ class HextileMcpServer:
             )
         return self.client.get_seed_batch(str(batch_id))
 
-    def _cancel_seed(self, _args: dict[str, Any]) -> Any:
-        return self.client.cancel_seed()
+    def _cancel_seed(self, args: dict[str, Any]) -> Any:
+        job_id = args.get("job_id")
+        if not job_id:
+            raise HextileClientError(
+                "job_id is required", status_code=None, kind="other"
+            )
+        return self.client.cancel_seed(str(job_id))
 
     def _list_360_loras(self, _args: dict[str, Any]) -> Any:
         return self.client.list_360_loras()

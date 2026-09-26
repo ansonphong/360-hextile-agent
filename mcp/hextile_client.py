@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import socket
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 import urllib.error
@@ -17,8 +18,7 @@ from typing import Any, Mapping, Optional
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT_S = 30.0
-# Generate endpoints can take longer (GPU).
-GENERATE_TIMEOUT_S = 300.0
+LONG_OPERATION_TIMEOUT_S = 300.0  # Unreal export and sequence extraction
 
 APP_DOWN_MSG = (
     "360 Hextile isn't running. Launch 360 Hextile, then retry."
@@ -259,7 +259,7 @@ class Client:
             return self.post_json(
                 f"/api/renders/{rid}/export",
                 payload,
-                timeout=GENERATE_TIMEOUT_S,
+                timeout=LONG_OPERATION_TIMEOUT_S,
             )
         except HextileClientError as exc:
             if exc.kind == "app_down":
@@ -440,7 +440,7 @@ class Client:
         return self.post_json(
             "/api/sequences/extract-video",
             {"video_path": video_path},
-            timeout=GENERATE_TIMEOUT_S,
+            timeout=LONG_OPERATION_TIMEOUT_S,
         )
 
     def create_sequence(
@@ -493,22 +493,45 @@ class Client:
         self,
         prompt: str,
         *,
+        request_id: str,
         lora_path: str,
         base_model: str,
         n: int = 4,
         **extra: Any,
     ) -> Any:
-        """POST /api/360-lora/generate (not /api/lora-360)."""
+        """Submit one idempotent 360-LoRA job; return its short acknowledgement."""
+        try:
+            if str(uuid.UUID(request_id)) != request_id:
+                raise ValueError("noncanonical UUID")
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise HextileClientError(
+                "request_id must be a canonical UUID", kind="other"
+            ) from exc
         body: dict[str, Any] = {
+            "request_id": request_id,
             "prompt": prompt,
             "lora_path": lora_path,
             "base_model": base_model,
             "num_variations": n,
         }
         body.update(extra)
-        return self.post_json(
-            "/api/360-lora/generate", body, timeout=GENERATE_TIMEOUT_S
-        )
+        try:
+            return self.post_json("/api/360-lora/jobs", body)
+        except HextileClientError as exc:
+            if exc.kind != "app_down":
+                raise
+            raise HextileClientError(
+                f"Seed acknowledgement unknown for job_id {request_id}. "
+                "Call get_seed_job with this ID; replay only the same request body and ID if needed.",
+                status_code=exc.status_code,
+                body=exc.body,
+                kind=exc.kind,
+            ) from exc
+
+    def get_seed_job(self, job_id: str) -> Any:
+        """GET exact job status, progress, original-index results, and errors."""
+        jid = urllib.parse.quote(job_id, safe="")
+        return self.get_json(f"/api/360-lora/jobs/{jid}")
 
     def list_seed_history(
         self,
@@ -527,9 +550,10 @@ class Client:
         bid = urllib.parse.quote(batch_id, safe="")
         return self.get_json(f"/api/360-lora/history/{bid}")
 
-    def cancel_seed(self) -> Any:
-        """POST /api/360-lora/cancel — stop the live 360-LoRA job (not a render)."""
-        return self.post_json("/api/360-lora/cancel")
+    def cancel_seed(self, job_id: str) -> Any:
+        """POST job-scoped cancel; never cancel a different seed job."""
+        jid = urllib.parse.quote(job_id, safe="")
+        return self.post_json(f"/api/360-lora/jobs/{jid}/cancel")
 
     def list_360_loras(self) -> Any:
         """GET /api/360-lora/loras — catalog for generate_seed path + base_model."""

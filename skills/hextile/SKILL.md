@@ -63,10 +63,11 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `cancel_run` | Kill a long GPU run | **yes** |
 | `retry_run` | Retry a crashed/failed run (APP returns 400 otherwise); uses APP tile-reuse policy | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |
-| `generate_seed` | Create equirect seed image via 360-LoRA | **yes** |
-| `list_seed_history` | Recover seed batches after the 300s generate_seed timeout | no |
-| `get_seed_batch` | Recover one seed batch after the 300s generate_seed timeout | no |
-| `cancel_seed` | Stop the live 360-LoRA job, not a render | **yes** |
+| `generate_seed` | Submit a 360-LoRA job with a caller-supplied UUID | **yes** |
+| `get_seed_job` | Read exact seed job progress, original-index results, and errors | no |
+| `list_seed_history` | List stored seed batches | no |
+| `get_seed_batch` | Read one stored seed batch | no |
+| `cancel_seed` | Cancel the named 360-LoRA job, not a render | **yes** |
 | `extract_sequence_video` | Extract video frames to a folder (video sequence door) | **yes** |
 | `create_sequence` | Create a `seq_*` from a folder + full config (not `run_workflow`) | **yes** |
 | `start_sequence` | Queue GPU for an existing sequence | **yes** |
@@ -95,7 +96,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 3. **Discover** → `list_workflows` → pick `origin` + `id`.
 4. **Inspect** → `get_workflow` if you need defaults before overriding.
 5. **Plan** → `validate_config` with the same overrides you intend to run.
-6. **Need a source image from a prompt?** → `list_360_loras` then `generate_seed` (two-step below).
+6. **Need a source image from a prompt?** → `list_360_loras` then `generate_seed` with a fresh UUID; poll `get_seed_job` (below).
 7. **Run** → `run_workflow` → keep `run_id` → `get_status` until terminal (`completed` / `failed` / `cancelled` / `crashed`). Use `list_runs` if the id is lost.
 8. **Save a variant** → `save_workflow` (`user`/`project`, **new** id). Create-only; 409 means pick another id.
 9. **Abort** → `cancel_run`.
@@ -120,14 +121,14 @@ Stills use `run_workflow` with builtin `upres-still`. Folders and video use that
 `InputSource` is `file` | `render` only. Generative producers are **not** render-time sources.
 
 1. `list_360_loras` → pick `path` and `base_model` (`sdxl` | `sd15` | `flux_schnell` | `qwen_image`).
-2. `generate_seed(prompt, lora_path, base_model, n?)` → `variations` (absolute paths) + `batch_id`.
-3. Pick one path (default index 0 unless the user chooses).
+2. Allocate a UUID, then `generate_seed(request_id, prompt, lora_path, base_model, n?)` → short acknowledgement with `job_id`.
+3. Poll `get_seed_job(job_id)` until terminal. Read `completed_variations` by each entry's original `index` (which may have gaps); choose the requested index and its absolute path. A missing index is unavailable, even if another variation succeeded.
 4. `run_workflow` with overrides:
 
 ```json
 {
   "input": {
-    "path": "/absolute/path/from/variations[i]",
+    "path": "/absolute/path/from/completed_variations[index=i]",
     "source": "file"
   }
 }
@@ -135,9 +136,9 @@ Stills use `run_workflow` with builtin `upres-still`. Folders and video use that
 
 Never write retired source types (`pattern`, `360_lora`, …) into render-time `input.source`.
 
-`generate_seed` hits **`POST /api/360-lora/generate`** (not `/api/lora-360`).
+`generate_seed` submits to **`POST /api/360-lora/jobs`**. Keep the UUID and exact request body until the job is resolved. If its acknowledgement is uncertain, call `get_seed_job` with that UUID. A 404 while submission is outstanding is provisional: replay the same UUID and body or report unknown; never mint another ID automatically. `get_seed_job` exposes progress, original-index paths and seeds, and typed terminal errors. `completed`, `partial`, `cancelled`, `failed`, and `interrupted` are terminal; only `completed` means every requested variation succeeded. Historical `list_seed_history` / `get_seed_batch` read stored batches.
 
-`generate_seed` can take up to **300s**. If the host times out, recover with `list_seed_history` / `get_seed_batch` — do not assume the job died. `cancel_seed` cancels **whatever seed job is live** (no batch id). It is global. Undo of a live apply is studio `loadConfig`, not this tool. Follow GET-apply of a finished **run** may still paint sliders (accepted leftover).
+`cancel_seed(job_id)` targets only that exact seed job. Undo of a live apply is studio `loadConfig`, not this tool. Follow GET-apply of a finished **run** may still paint sliders (accepted leftover).
 
 ## App-down / upgrade recovery
 
@@ -167,7 +168,8 @@ get_capabilities
 Prompt-only world (when a 360-LoRA is available):
 
 ```
-list_360_loras → generate_seed → pick variations[0]
+list_360_loras → generate_seed(request_id=<UUID>, ...) → get_seed_job(job_id)
+→ pick completed_variations entry with index=0 when available
 → run_workflow(..., overrides={ input: { path, source: "file" }, prompt: {...} })
 → get_status
 ```
@@ -206,9 +208,10 @@ curl -s -X POST http://127.0.0.1:8000/api/workflows/user \
 
 # Seed (360-LoRA)
 curl -s http://127.0.0.1:8000/api/360-lora/loras
-curl -s -X POST http://127.0.0.1:8000/api/360-lora/generate \
+curl -s -X POST http://127.0.0.1:8000/api/360-lora/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"...","lora_path":"...","base_model":"sdxl","num_variations":4}'
+  -d '{"request_id":"00000000-0000-4000-8000-000000000001","prompt":"...","lora_path":"...","base_model":"sdxl","num_variations":4}'
+curl -s http://127.0.0.1:8000/api/360-lora/jobs/00000000-0000-4000-8000-000000000001
 ```
 
 ## Not in this plugin

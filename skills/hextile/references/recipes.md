@@ -18,13 +18,16 @@ get_status(run_id)
 
 ```
 list_360_loras          # pick path + base_model (and trigger_word if listed)
-generate_seed(prompt, lora_path, base_model, n=4)
-# pick variations[0]
+generate_seed(request_id=<fresh UUID>, prompt, lora_path, base_model, n=4)
+get_seed_job(job_id)    # poll until terminal; retain this exact ID
+# choose completed_variations entry with original index=0, if present
 run_workflow(workflow_id=quick-scout, overrides={
   "input": {"path": "<variation path>", "source": "file"},
   "prompt": {"global": "<look>"}
 })
 ```
+
+If the submit acknowledgement is uncertain, GET the same UUID. A provisional 404 permits replay of the identical body and UUID, never a new ID. `partial`, `cancelled`, `failed`, and `interrupted` may retain completed entries; report the status and any missing requested index honestly. `cancel_seed(job_id)` affects only that seed job. `list_seed_history` and `get_seed_batch` remain for stored batches.
 
 ## C — Save a user variant
 

@@ -15,7 +15,7 @@ Send **`workflow_id` + `overrides`**, or a full `document` you cloned from `get_
 3. `list_workflows` → pick `origin` + `id` (start from a builtin).
 4. `get_workflow` → clone mentally; do not rewrite the whole file unless asked.
 5. `validate_config` with the same overrides you will run.
-6. Need a seed image? `list_360_loras` → `generate_seed` → set `input.path` + `source=file`.
+6. Need a seed image? `list_360_loras` → allocate a UUID → `generate_seed(request_id=UUID, …)` → poll `get_seed_job(job_id)` until terminal. Pick the requested original `completed_variations[].index`, then set its path as `input.path` with `source=file`. Gaps do not shift indices.
 7. `run_workflow` → keep `run_id`.
 8. `get_status` until `completed` / `failed` / `cancelled` / `crashed`. Or `list_runs` if you lost the id.
 9. Optional: `save_workflow` to `user`/`project` with a **new** id.
@@ -34,6 +34,7 @@ Send **`workflow_id` + `overrides`**, or a full `document` you cloned from `get_
 ## Safety
 
 - Cancel with `cancel_run` before starting a second heavy GPU job if one is `running`. `stop_sequence` before a second sequence if one is `processing`.
+- Keep the exact seed request and UUID through an uncertain acknowledgement. GET that UUID; if 404 is provisional, replay the same request and UUID or report unknown. `cancel_seed(job_id)` targets only that job.
 - GPU upres of many frames is a sequence via `/hextile-upres`, not a loop of `run_workflow` over a frame folder.
 - Do not delete builtin. Do not `delete_workflow` unless the user asked.
 - License HTTP 402 → tell the user to activate in Settings.

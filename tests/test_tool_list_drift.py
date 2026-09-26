@@ -71,6 +71,7 @@ EXPECTED_TOOLS = (
     "cancel_run",
     "retry_run",
     "generate_seed",
+    "get_seed_job",
     "list_seed_history",
     "get_seed_batch",
     "cancel_seed",
@@ -103,7 +104,7 @@ EXPECTED_TOOLS = (
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 42
+    assert len(EXPECTED_TOOLS) == 43
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -173,7 +174,7 @@ def test_app_tool_names_ast_equals() -> None:
     assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
     app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
     assert set(TOOL_NAMES) == app_names
-    assert len(app_names) == 42
+    assert len(app_names) == 43
 
 
 def test_skill_tool_names_subset_of_mcp() -> None:
@@ -358,6 +359,110 @@ def test_private_headers_are_request_local() -> None:
     assert "x-hextile-copilot-token" not in seen[1]
     assert "x-hextile-op" not in seen[1]
     assert seen[2]["x-hextile-agent"] == "mcp"
+
+
+def test_seed_client_uses_exact_job_routes_and_preserves_result() -> None:
+    seen: list[tuple[str, str, Any, float | None]] = []
+    request_id = "b7519ceb-e344-464d-923c-ef16e02050e6"
+    receipt = {
+        "job_id": request_id,
+        "status": "partial",
+        "completed_variations": [
+            {"index": 2, "id": "v2", "path": "D:/seeds/v2.png", "seed": 42}
+        ],
+        "variation_errors": [{"index": 0, "message": "failed"}],
+        "error": {"code": "generation_failed", "message": "one variation failed"},
+    }
+
+    class _Resp:
+        status = 200
+
+        def __init__(self, body: Any) -> None:
+            self.body = body
+
+        def read(self) -> bytes:
+            return json.dumps(self.body).encode()
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req, timeout=None):  # noqa: ANN001
+        seen.append((req.get_method(), req.full_url, json.loads(req.data) if req.data else None, timeout))
+        if req.get_method() == "GET":
+            return _Resp(receipt)
+        return _Resp({"job_id": request_id, "status": "accepted"})
+
+    client = Client(opener=opener)
+    ack = client.generate_seed("look", request_id=request_id, lora_path="lora", base_model="sdxl", n=4)
+    assert ack == {"job_id": request_id, "status": "accepted"}
+    assert seen[0][0:2] == ("POST", "http://127.0.0.1:8000/api/360-lora/jobs")
+    assert seen[0][2] == {
+        "request_id": request_id, "prompt": "look", "lora_path": "lora",
+        "base_model": "sdxl", "num_variations": 4,
+    }
+    assert seen[0][3] == 30.0
+    assert client.get_seed_job(request_id) == receipt
+    assert seen[1][0:2] == ("GET", f"http://127.0.0.1:8000/api/360-lora/jobs/{request_id}")
+    client.cancel_seed(request_id)
+    assert seen[2][0:2] == ("POST", f"http://127.0.0.1:8000/api/360-lora/jobs/{request_id}/cancel")
+    with pytest.raises(HextileClientError, match="canonical UUID"):
+        client.generate_seed("look", request_id="bad-id", lora_path="lora", base_model="sdxl")
+    assert len(seen) == 3
+
+
+def test_seed_tools_require_exact_ids_and_activity_keeps_seed_out_of_run() -> None:
+    posted: list[dict[str, Any]] = []
+    request_id = "b7519ceb-e344-464d-923c-ef16e02050e6"
+
+    class FakeClient:
+        def generate_seed(self, _prompt: str, **kwargs: Any) -> dict[str, Any]:
+            return {"job_id": kwargs["request_id"], "run_id": "wrong-run", "status": "accepted"}
+
+        def get_seed_job(self, job_id: str) -> dict[str, Any]:
+            return {"job_id": job_id, "run_id": "wrong-run", "status": "partial", "completed_variations": [{"index": 2, "path": "D:/v2.png", "seed": 42}]}
+
+        def cancel_seed(self, job_id: str) -> dict[str, Any]:
+            return {"job_id": job_id, "run_id": "wrong-run", "status": "cancelling"}
+
+        def post_activity(self, envelope: dict[str, Any]) -> None:
+            posted.append(envelope)
+
+    server = HextileMcpServer(client=FakeClient())  # type: ignore[arg-type]
+    for name in ("generate_seed", "get_seed_job", "cancel_seed"):
+        assert "job_id" in _tool_schema(name)["properties"] or name == "generate_seed"
+        required = "request_id" if name == "generate_seed" else "job_id"
+        assert required in _tool_schema(name)["required"]
+        assert server.call_tool(name, {})["isError"] is True
+    posted.clear()
+    generated = server.call_tool("generate_seed", {
+        "request_id": request_id, "prompt": "look", "lora_path": "lora", "base_model": "sdxl",
+    })
+    assert generated["isError"] is False
+    got = server.call_tool("get_seed_job", {"job_id": request_id})
+    assert got["isError"] is False
+    assert json.loads(got["content"][0]["text"])["completed_variations"][0]["index"] == 2
+    cancelled = server.call_tool("cancel_seed", {"job_id": request_id})
+    assert cancelled["isError"] is False
+    assert {event["seed"]["job_id"] for event in posted} == {request_id}
+    assert not any("run" in event for event in posted)
+    assert [event["seed"].get("status") for event in posted if event["phase"] != "started"] == ["accepted", "partial", "cancelling"]
+
+
+def test_uncertain_seed_ack_names_recoverable_job_id() -> None:
+    request_id = "b7519ceb-e344-464d-923c-ef16e02050e6"
+
+    def timeout(_req: Any, timeout: Any = None) -> Any:
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    client = Client(opener=timeout)
+    with pytest.raises(HextileClientError) as caught:
+        client.generate_seed("look", request_id=request_id, lora_path="lora", base_model="sdxl")
+    assert caught.value.kind == "app_down"
+    assert request_id in str(caught.value)
+    assert "get_seed_job" in str(caught.value)
 
 
 def test_save_workflow_rejects_builtin() -> None:
