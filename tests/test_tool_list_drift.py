@@ -71,6 +71,7 @@ EXPECTED_TOOLS = (
     "get_render_config",
     "get_logs",
     "list_runs",
+    "search_library_prompts",
     "cancel_run",
     "retry_run",
     "generate_seed",
@@ -114,7 +115,7 @@ EXPECTED_TOOLS = (
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 52
+    assert len(EXPECTED_TOOLS) == 53
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -159,6 +160,7 @@ def test_open4_annotations_partition() -> None:
     assert "preflight_file_export" in _READ_ONLY
     assert "export_render_file" in _MUTATING
     assert "get_gpu_diagnostics" in _READ_ONLY
+    assert "search_library_prompts" in _READ_ONLY
     assert "get_seed_memory_advice" in _READ_ONLY
     assert "retry_run" in _MUTATING
     assert {"get_model_readiness", "get_model_download_queue"} <= _READ_ONLY
@@ -243,6 +245,42 @@ def test_gpu_diagnostics_tool_and_retry_mapping() -> None:
     ]
     assert _tool_schema("get_gpu_diagnostics")["properties"] == {}
     assert _tool_schema("retry_run")["properties"]["vram_recovery"]["type"] == "boolean"
+
+
+def test_search_library_prompts_forwards_page_without_paths_or_retry() -> None:
+    page = {
+        "hits": [{"kind": "render", "id": "render-1", "snippet": "moonlight"}],
+        "next_cursor": "opaque-next-page",
+        "scanned": 3,
+        "skipped": {"oversized": 0, "unreadable": 0},
+    }
+    args = {
+        "query": "moonlight",
+        "kinds": ["render", "sequence"],
+        "lifecycle_status": "archived",
+        "limit": 4,
+        "cursor": "opaque-prior-page",
+    }
+    response = mock.MagicMock(status=200)
+    response.read.return_value = json.dumps(page).encode("utf-8")
+    response.__enter__.return_value = response
+    opener = mock.Mock(return_value=response)
+    server = HextileMcpServer(client=Client(opener=opener))
+    assert server._search_library_prompts(args) == page
+    opener.assert_called_once()
+    request = opener.call_args.args[0]
+    assert request.get_method() == "POST"
+    assert request.full_url == "http://127.0.0.1:8000/api/renders/library-prompts/search"
+    assert json.loads(request.data) == args
+    schema = _tool_schema("search_library_prompts")
+    assert schema["required"] == ["query"]
+    assert set(schema["properties"]) == set(args)
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["kinds"]["items"]["enum"] == ["render", "sequence"]
+    assert schema["properties"]["kinds"]["maxItems"] == 2
+    assert schema["properties"]["lifecycle_status"]["enum"] == ["active", "archived", "trashed"]
+    assert schema["properties"]["limit"]["maximum"] == 50
+    assert schema["properties"]["cursor"]["maxLength"] == 1024
 
 
 def test_seed_memory_advice_keeps_separate_samples_and_typed_errors() -> None:

@@ -467,6 +467,10 @@ class Client:
             params={"lifecycle_status": status},
         )
 
+    def search_library_prompts(self, body: Mapping[str, Any]) -> Any:
+        """POST a bounded render/sequence prompt search page."""
+        return self.post_json("/api/renders/library-prompts/search", body)
+
     # ── sequences ───────────────────────────────────────────────────────
 
     def extract_sequence_video(self, video_path: str) -> Any:

@@ -67,6 +67,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_render_config` | Read producing .hextile.json for a render | no |
 | `get_logs` | Fetch failed-run logs | no |
 | `list_runs` | Find jobs if you lost `run_id` | no |
+| `search_library_prompts` | Search saved render/sequence prompt text; page exact IDs and snippets with `cursor` | no |
 | `cancel_run` | Kill a long GPU run | **yes** |
 | `retry_run` | Retry a crashed/failed run; `vram_recovery=true` explicitly permits guarded idle-holder eviction for that exact render | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |

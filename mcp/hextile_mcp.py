@@ -57,6 +57,7 @@ TOOL_NAMES = (
     "get_render_config",
     "get_logs",
     "list_runs",
+    "search_library_prompts",
     "cancel_run",
     "retry_run",
     "generate_seed",
@@ -110,6 +111,7 @@ _READ_ONLY = frozenset(
         "get_render_config",
         "get_logs",
         "list_runs",
+        "search_library_prompts",
         "list_seed_history",
         "get_seed_job",
         "get_seed_batch",
@@ -529,6 +531,27 @@ TOOLS: list[dict[str, Any]] = [
                 "default": "active",
             },
         },
+    ),
+    _tool_def(
+        "search_library_prompts",
+        "Search saved global and tile prompts in render and sequence library rows. "
+        "Returns exact IDs, snippets, and a cursor for the next bounded page. Read-only.",
+        {
+            "query": {"type": "string", "minLength": 2, "maxLength": 256},
+            "kinds": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["render", "sequence"]},
+                "minItems": 1,
+                "maxItems": 2,
+            },
+            "lifecycle_status": {
+                "type": "string",
+                "enum": ["active", "archived", "trashed"],
+            },
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            "cursor": {"type": "string", "maxLength": 1024},
+        },
+        required=["query"],
     ),
     _tool_def(
         "cancel_run",
@@ -1174,7 +1197,7 @@ TOOLS: list[dict[str, Any]] = [
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 52
+assert len(TOOL_NAMES) == 53
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1292,6 +1315,7 @@ class HextileMcpServer:
             "get_render_config": self._get_render_config,
             "get_logs": self._get_logs,
             "list_runs": self._list_runs,
+            "search_library_prompts": self._search_library_prompts,
             "cancel_run": self._cancel_run,
             "retry_run": self._retry_run,
             "generate_seed": self._generate_seed,
@@ -1853,6 +1877,9 @@ class HextileMcpServer:
         return self.client.list_runs(
             str(args.get("lifecycle_status") or "active")
         )
+
+    def _search_library_prompts(self, args: dict[str, Any]) -> Any:
+        return self.client.search_library_prompts(args)
 
     def _cancel_run(self, args: dict[str, Any]) -> Any:
         run_id = args.get("run_id")
