@@ -65,6 +65,11 @@ TOOL_NAMES = (
     "cancel_seed",
     "list_360_loras",
     "list_installed_models",
+    "get_model_readiness",
+    "get_model_download_queue",
+    "install_model",
+    "repair_model",
+    "cancel_model_download",
     "get_guide",
     "extract_sequence_video",
     "create_sequence",
@@ -108,6 +113,8 @@ _READ_ONLY = frozenset(
         "get_seed_batch",
         "list_360_loras",
         "list_installed_models",
+        "get_model_readiness",
+        "get_model_download_queue",
         "get_guide",
         "get_sequence",
         "list_sequences",
@@ -130,6 +137,9 @@ _MUTATING = frozenset(
         "cancel_run",
         "retry_run",
         "cancel_seed",
+        "install_model",
+        "repair_model",
+        "cancel_model_download",
         "extract_sequence_video",
         "create_sequence",
         "start_sequence",
@@ -167,6 +177,7 @@ _DESTRUCTIVE = frozenset(
         "delete_workflow",
         "stop_sequence",
         "cancel_batch",
+        "cancel_model_download",
     }
 )
 _CONTROL_TOOLS = frozenset(
@@ -181,6 +192,7 @@ _CONTROL_TOOLS = frozenset(
         "cancel_seed",
         "stop_sequence",
         "cancel_batch",
+        "cancel_model_download",
     }
 )
 _PRIVATE_ARGUMENT_KEYS = frozenset(
@@ -662,6 +674,58 @@ TOOLS: list[dict[str, Any]] = [
         required=["pipeline_id"],
     ),
     _tool_def(
+        "get_model_readiness",
+        "Read current model fit, availability, and install bundle from the app. "
+        "Fit estimates total card capacity, not current free VRAM. Overrides are exploratory only.",
+        {"overrides": {"type": "array", "maxItems": 32, "items": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "pipeline_id": {"type": "string", "minLength": 1},
+                "model_id": {"type": "string", "minLength": 1},
+                "quantization": {"type": "string", "enum": [
+                    "fp16", "bf16", "fp8", "nf4", "int8", "none", "bnb_nf4",
+                    "bnb_4bit", "bnb_8bit", "gguf_q4", "gguf_q8", "quanto_int8",
+                ]},
+                "speed_mode": {"type": "string", "enum": ["quality", "turbo", "max_speed"]},
+                "text_encoder_precision": {"type": "string", "enum": ["auto", "nf4", "bf16"]},
+            },
+            "required": ["pipeline_id", "model_id"],
+        }}},
+    ),
+    _tool_def(
+        "get_model_download_queue",
+        "Read the app's active and queued model downloads, including queue_entry_id for exact cancellation.",
+        {},
+    ),
+    _tool_def(
+        "install_model",
+        "Queue one registry model, or its current default-catalog selected bundle. "
+        "Bundle requires the server-issued selection fingerprint; host approval is required.",
+        {
+            "pipeline_id": {"type": "string", "minLength": 1},
+            "model_id": {"type": "string", "minLength": 1},
+            "bundle": {"type": "boolean"},
+            "expected_selection_fingerprint": {"type": "string", "minLength": 1},
+        },
+        required=["pipeline_id", "model_id", "bundle"],
+    ),
+    _tool_def(
+        "repair_model",
+        "Ask the app to diagnose and queue repair for one registry model. Host approval is required.",
+        {"pipeline_id": {"type": "string", "minLength": 1},
+         "model_id": {"type": "string", "minLength": 1}},
+        required=["pipeline_id", "model_id"],
+    ),
+    _tool_def(
+        "cancel_model_download",
+        "Request cancellation of only the observed queue admission. "
+        "A successful request may still be draining; observe the queue. Host approval is required.",
+        {"pipeline_id": {"type": "string", "minLength": 1},
+         "model_id": {"type": "string", "minLength": 1},
+         "expected_queue_entry_id": {"type": "string", "minLength": 1}},
+        required=["pipeline_id", "model_id", "expected_queue_entry_id"],
+    ),
+    _tool_def(
         "get_guide",
         "Read bundled agent documentation (schema, best practices, "
         "website index, recipes). Pass name, or omit to list guides.",
@@ -1083,7 +1147,7 @@ TOOLS: list[dict[str, Any]] = [
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 46
+assert len(TOOL_NAMES) == 51
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1209,6 +1273,11 @@ class HextileMcpServer:
             "cancel_seed": self._cancel_seed,
             "list_360_loras": self._list_360_loras,
             "list_installed_models": self._list_installed_models,
+            "get_model_readiness": self._get_model_readiness,
+            "get_model_download_queue": self._get_model_download_queue,
+            "install_model": self._install_model,
+            "repair_model": self._repair_model,
+            "cancel_model_download": self._cancel_model_download,
             "get_guide": self._get_guide,
             "extract_sequence_video": self._extract_sequence_video,
             "create_sequence": self._create_sequence,
@@ -1837,6 +1906,79 @@ class HextileMcpServer:
                 kind="other",
             )
         return self.client.list_installed_models(pipeline_id)
+
+    def _model_args(self, args: dict[str, Any], allowed: set[str]) -> tuple[str, str]:
+        unexpected = set(args) - allowed
+        if unexpected:
+            raise HextileClientError(f"Unsupported model argument: {sorted(unexpected)[0]}", kind="other")
+        for key in ("pipeline_id", "model_id"):
+            if not isinstance(args.get(key), str) or not args[key].strip():
+                raise HextileClientError(f"{key} is required", kind="other")
+        return args["pipeline_id"], args["model_id"]
+
+    def _get_model_readiness(self, args: dict[str, Any]) -> Any:
+        if set(args) - {"overrides"}:
+            raise HextileClientError("Unsupported readiness argument", kind="other")
+        overrides = args.get("overrides", [])
+        if not isinstance(overrides, list) or len(overrides) > 32:
+            raise HextileClientError("overrides must contain at most 32 entries", kind="other")
+        allowed = {"pipeline_id", "model_id", "quantization", "speed_mode", "text_encoder_precision"}
+        for item in overrides:
+            if not isinstance(item, dict) or set(item) - allowed:
+                raise HextileClientError("Unsupported model override", kind="other")
+            self._model_args(item, allowed)
+        return self.client.get_model_readiness(overrides)
+
+    def _get_model_download_queue(self, args: dict[str, Any]) -> Any:
+        if args:
+            raise HextileClientError("Download queue takes no arguments", kind="other")
+        return self.client.get_model_download_queue()
+
+    def _install_model(self, args: dict[str, Any]) -> Any:
+        pipeline_id, model_id = self._model_args(
+            args, {"pipeline_id", "model_id", "bundle", "expected_selection_fingerprint"}
+        )
+        if type(args.get("bundle")) is not bool:
+            raise HextileClientError("bundle must be a boolean", kind="other")
+        fingerprint = args.get("expected_selection_fingerprint")
+        if args["bundle"]:
+            if not isinstance(fingerprint, str) or not fingerprint.strip():
+                raise HextileClientError("Bundle install requires expected_selection_fingerprint", kind="other")
+            catalog = self.client.get_model_readiness([])
+            rows = catalog.get("models") if isinstance(catalog, dict) else None
+            selected = next((row for row in rows if isinstance(row, dict)
+                             and row.get("pipeline_id") == pipeline_id
+                             and row.get("id") == model_id), None) if isinstance(rows, list) else None
+            if not selected or not selected.get("selection_fingerprint"):
+                raise HextileClientError("Default catalog selection fingerprint unavailable; refresh readiness", kind="capability")
+            if selected["selection_fingerprint"] != fingerprint:
+                raise HextileClientError("Selected model bundle changed; refresh readiness", status_code=409, kind="http")
+            return self.client.install_model_bundle(pipeline_id, model_id, fingerprint)
+        if fingerprint is not None:
+            raise HextileClientError("Single-model install does not accept a bundle fingerprint", kind="other")
+        return self.client.install_model_single(pipeline_id, model_id)
+
+    def _repair_model(self, args: dict[str, Any]) -> Any:
+        pipeline_id, model_id = self._model_args(args, {"pipeline_id", "model_id"})
+        return self.client.repair_model(pipeline_id, model_id)
+
+    def _cancel_model_download(self, args: dict[str, Any]) -> Any:
+        pipeline_id, model_id = self._model_args(
+            args, {"pipeline_id", "model_id", "expected_queue_entry_id"}
+        )
+        entry_id = args.get("expected_queue_entry_id")
+        if not isinstance(entry_id, str) or not entry_id.strip():
+            raise HextileClientError("expected_queue_entry_id is required", kind="other")
+        queue = self.client.get_model_download_queue()
+        rows = (queue.get("queued", []) + queue.get("downloads", [])) if isinstance(queue, dict) else []
+        current = next((row for row in rows if isinstance(row, dict)
+                        and row.get("pipeline_id") == pipeline_id
+                        and row.get("model_id") == model_id), None)
+        if not current or not current.get("queue_entry_id"):
+            raise HextileClientError("Observed queue entry unavailable; refresh queue", kind="capability")
+        if current["queue_entry_id"] != entry_id:
+            raise HextileClientError("Download queue entry changed or settled", status_code=409, kind="http")
+        return self.client.cancel_model_download(pipeline_id, model_id, entry_id)
 
     def _get_guide(self, args: dict[str, Any]) -> Any:
         return load_guide(str(args.get("name") or "index"))

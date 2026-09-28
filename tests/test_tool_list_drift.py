@@ -78,6 +78,11 @@ EXPECTED_TOOLS = (
     "cancel_seed",
     "list_360_loras",
     "list_installed_models",
+    "get_model_readiness",
+    "get_model_download_queue",
+    "install_model",
+    "repair_model",
+    "cancel_model_download",
     "get_guide",
     "extract_sequence_video",
     "create_sequence",
@@ -107,7 +112,7 @@ EXPECTED_TOOLS = (
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 46
+    assert len(EXPECTED_TOOLS) == 51
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -153,6 +158,9 @@ def test_open4_annotations_partition() -> None:
     assert "export_render_file" in _MUTATING
     assert "get_gpu_diagnostics" in _READ_ONLY
     assert "retry_run" in _MUTATING
+    assert {"get_model_readiness", "get_model_download_queue"} <= _READ_ONLY
+    assert {"install_model", "repair_model", "cancel_model_download"} <= _MUTATING
+    assert "cancel_model_download" in _DESTRUCTIVE
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:
@@ -233,6 +241,141 @@ def test_gpu_diagnostics_tool_and_retry_mapping() -> None:
     ]
     assert _tool_schema("get_gpu_diagnostics")["properties"] == {}
     assert _tool_schema("retry_run")["properties"]["vram_recovery"]["type"] == "boolean"
+
+
+def test_model_tool_schemas_are_closed_and_targeted() -> None:
+    for name in ("get_model_readiness", "get_model_download_queue", "install_model",
+                 "repair_model", "cancel_model_download"):
+        assert _tool_schema(name)["additionalProperties"] is False
+    assert _tool_schema("get_model_download_queue")["properties"] == {}
+    override = _tool_schema("get_model_readiness")["properties"]["overrides"]
+    assert override["maxItems"] == 32
+    assert override["items"]["additionalProperties"] is False
+    assert override["items"]["required"] == ["pipeline_id", "model_id"]
+    assert _tool_schema("install_model")["required"] == ["pipeline_id", "model_id", "bundle"]
+    assert _tool_schema("cancel_model_download")["required"] == [
+        "pipeline_id", "model_id", "expected_queue_entry_id"
+    ]
+    for name in ("install_model", "repair_model", "cancel_model_download"):
+        assert "approved" not in _tool_schema(name)["properties"]
+        assert "path" not in _tool_schema(name)["properties"]
+
+
+def test_model_client_routes_and_unknown_outcome() -> None:
+    seen: list[tuple[str, str, Any]] = []
+
+    class Response:
+        status = 200
+
+        def read(self) -> bytes:
+            return b'{"ok":true}'
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        seen.append((req.get_method(), req.full_url, json.loads(req.data) if req.data else None))
+        return Response()
+
+    client = Client(opener=opener)
+    client.get_model_readiness([{"pipeline_id": "sdxl", "model_id": "base"}])
+    client.get_model_download_queue()
+    client.install_model_single("sdxl", "base")
+    client.install_model_bundle("sdxl", "base", "fingerprint")
+    client.repair_model("sdxl", "base/part")
+    client.cancel_model_download("sdxl", "base/part", "entry-id")
+    assert seen == [
+        ("POST", "http://127.0.0.1:8000/api/models/selection-catalog",
+         {"overrides": [{"pipeline_id": "sdxl", "model_id": "base"}]}),
+        ("GET", "http://127.0.0.1:8000/api/models/queue", None),
+        ("POST", "http://127.0.0.1:8000/api/models/queue/add",
+         {"pipeline_id": "sdxl", "model_id": "base"}),
+        ("POST", "http://127.0.0.1:8000/api/models/queue/pipeline/sdxl?selected_model_id=base&expected_selection_fingerprint=fingerprint", None),
+        ("POST", "http://127.0.0.1:8000/api/models/sdxl/base%2Fpart/repair", None),
+        ("POST", "http://127.0.0.1:8000/api/models/sdxl/base%2Fpart/cancel?expected_queue_entry_id=entry-id", None),
+    ]
+
+    def lost(_req: Any, timeout: Any = None) -> None:
+        raise urllib.error.URLError(ConnectionResetError("lost acknowledgement"))
+
+    with pytest.raises(HextileClientError) as ei:
+        Client(opener=lost).repair_model("sdxl", "base")
+    assert ei.value.kind == "model_outcome_unknown"
+    assert "read the download queue" in str(ei.value)
+
+
+def test_model_handlers_require_current_preconditions_and_exact_target() -> None:
+    client = mock.Mock()
+    server = HextileMcpServer(client=client)
+    client.get_model_readiness.return_value = {"models": [{
+        "pipeline_id": "sdxl", "id": "base", "selection_fingerprint": "fp",
+    }]}
+    client.get_model_download_queue.return_value = {"queued": [{
+        "pipeline_id": "sdxl", "model_id": "base", "queue_entry_id": "entry",
+    }], "downloads": []}
+    server._install_model({"pipeline_id": "sdxl", "model_id": "base", "bundle": True,
+                           "expected_selection_fingerprint": "fp"})
+    client.get_model_readiness.assert_called_once_with([])
+    client.install_model_bundle.assert_called_once_with("sdxl", "base", "fp")
+    server._install_model({"pipeline_id": "sdxl", "model_id": "base", "bundle": False})
+    client.install_model_single.assert_called_once_with("sdxl", "base")
+    server._repair_model({"pipeline_id": "sdxl", "model_id": "base"})
+    client.repair_model.assert_called_once_with("sdxl", "base")
+    server._cancel_model_download({"pipeline_id": "sdxl", "model_id": "base",
+                                   "expected_queue_entry_id": "entry"})
+    client.cancel_model_download.assert_called_once_with("sdxl", "base", "entry")
+
+    client.get_model_readiness.return_value = {"models": [{"pipeline_id": "sdxl", "id": "base"}]}
+    with pytest.raises(HextileClientError):
+        server._install_model({"pipeline_id": "sdxl", "model_id": "base", "bundle": True,
+                               "expected_selection_fingerprint": "fp"})
+    client.get_model_readiness.return_value = {"models": [{
+        "pipeline_id": "sdxl", "id": "base", "selection_fingerprint": "new-fp",
+    }]}
+    with pytest.raises(HextileClientError) as stale_selection:
+        server._install_model({"pipeline_id": "sdxl", "model_id": "base", "bundle": True,
+                               "expected_selection_fingerprint": "fp"})
+    assert stale_selection.value.status_code == 409
+    client.get_model_download_queue.return_value = {"queued": [{
+        "pipeline_id": "sdxl", "model_id": "base",
+    }], "downloads": []}
+    with pytest.raises(HextileClientError):
+        server._cancel_model_download({"pipeline_id": "sdxl", "model_id": "base",
+                                       "expected_queue_entry_id": "entry"})
+    client.get_model_download_queue.return_value = {"queued": [{
+        "pipeline_id": "sdxl", "model_id": "base", "queue_entry_id": "new-entry",
+    }], "downloads": []}
+    with pytest.raises(HextileClientError) as stale_entry:
+        server._cancel_model_download({"pipeline_id": "sdxl", "model_id": "base",
+                                       "expected_queue_entry_id": "entry"})
+    assert stale_entry.value.status_code == 409
+    with pytest.raises(HextileClientError):
+        server._repair_model({"pipeline_id": "sdxl", "model_id": "base", "path": "/tmp/x"})
+    with pytest.raises(HextileClientError):
+        server._install_model({"pipeline_id": "sdxl", "model_id": "base", "bundle": False,
+                               "approved": True})
+    client.install_model_bundle.assert_called_once()
+    client.cancel_model_download.assert_called_once()
+
+
+@pytest.mark.parametrize("status", [403, 404, 409, 422])
+def test_model_http_errors_remain_tool_errors(status: int) -> None:
+    def rejected(req: Any, timeout: Any = None) -> None:
+        raise urllib.error.HTTPError(
+            url=req.full_url, code=status, msg="rejected", hdrs=None,
+            fp=io.BytesIO(b'{"detail":"rejected"}'),
+        )
+
+    result = HextileMcpServer(client=Client(opener=rejected)).call_tool(
+        "repair_model", {"pipeline_id": "sdxl", "model_id": "base"}
+    )
+    assert result["isError"] is True
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["status_code"] == status
+    assert payload["kind"] == "http"
 
 
 def test_skill_tool_names_subset_of_mcp() -> None:

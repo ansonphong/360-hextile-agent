@@ -55,6 +55,11 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `delete_workflow` | Remove a user/project workflow | **yes** |
 | `validate_config` | Dry-run merge+validate (terraform plan) | no |
 | `list_installed_models` | Installed weights — dry-run is Pydantic only | no |
+| `get_model_readiness` | Read current model fit, missing components, and install bundles | no |
+| `get_model_download_queue` | Read active/queued downloads and exact queue-entry tokens | no |
+| `install_model` | Queue one registry model or a fingerprint-bound selected bundle | **yes** |
+| `repair_model` | Request server-diagnosed repair of one registry model | **yes** |
+| `cancel_model_download` | Request stop of one observed queue admission | **yes** |
 | `run_workflow` | Queue a render after overrides | **yes** |
 | `get_status` | Poll `run_id` progress / output paths | no |
 | `get_gpu_diagnostics` | Read app-owned GPU/VRAM snapshot, its sample age, and known/unknown holders | no |
@@ -110,6 +115,12 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 Call `get_gpu_diagnostics` for the app's selected device and current status. The NVML card/process sample may be cached: read `accounting.nvml_sampled_at_unix_ms` and `nvml_sample_age_ms`; null means no valid NVML sample. Device use, per-process attribution, Torch/CuPy pools, and registered holder footprints overlap, so do not add them together or claim a workload will fit. WDDM can leave this-app attribution null; a holder's `busy_state=unknown` is not idle. Use a workload-specific estimator where available and keep its result advisory.
 
 `retry_run(run_id)` is an ordinary retry. If the user explicitly requests idle-holder recovery for that failed render, explain that `retry_run(run_id, vram_recovery=true)` may evict idle in-app GPU holders for that exact render, then obtain the host's mutation approval for those exact arguments. Tool arguments such as `approved:true` are never approval. Do not offer process killing or unload-all as a diagnosis action.
+
+### Model readiness and queue actions
+
+Read `get_model_readiness` and `get_model_download_queue` first. Disclose the exact `pipeline_id` / `model_id`, selected bundle members, and current queue state before asking the host for its existing mutation confirmation. `get_model_readiness.overrides` is for exploring fit only; refresh the default catalog without overrides before a bundle install. Fit compares estimated workload needs with total card capacity; use `get_gpu_diagnostics` to explain current free pressure separately.
+
+For `install_model(bundle=true)`, use the selected primary's current default-catalog `selection_fingerprint` as `expected_selection_fingerprint`. The app checks it again at admission and rejects drift with 409. `bundle=false` queues only the named registry identity. `repair_model` names one registry identity; the app diagnoses files itself. Do not pass paths, URLs, or an `approved` flag. For `cancel_model_download`, use the `queue_entry_id` from the exact queued/active row as `expected_queue_entry_id`. A successful cancel response requests a stop; keep reading the queue until it settles. If an action acknowledgement is unknown, read the queue before any repeat. If the app lacks the fingerprint or queue-entry token, do not make the guarded action.
 
 ## Upres
 

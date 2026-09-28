@@ -612,6 +612,57 @@ class Client:
             return out
         return {"catalog_status": status, "note": note}
 
+    def get_model_readiness(self, overrides: list[Mapping[str, Any]]) -> Any:
+        return self.post_json("/api/models/selection-catalog", {"overrides": overrides})
+
+    def get_model_download_queue(self) -> Any:
+        return self.get_json("/api/models/queue")
+
+    def _model_mutation(self, path: str, body: Optional[Mapping[str, Any]] = None,
+                        *, params: Optional[Mapping[str, Any]] = None) -> Any:
+        try:
+            return self.post_json(path, body, params=params)
+        except http.client.HTTPException as exc:
+            raise HextileClientError(
+                "Model queue action outcome unknown; read the download queue before any repeat.",
+                body=str(exc), kind="model_outcome_unknown",
+            ) from exc
+        except HextileClientError as exc:
+            if exc.kind == "app_down":
+                raise HextileClientError(
+                    "Model queue action outcome unknown; read the download queue before any repeat.",
+                    body=exc.body, kind="model_outcome_unknown",
+                ) from exc
+            raise
+
+    def install_model_single(self, pipeline_id: str, model_id: str) -> Any:
+        return self._model_mutation("/api/models/queue/add", {
+            "pipeline_id": pipeline_id, "model_id": model_id,
+        })
+
+    def install_model_bundle(self, pipeline_id: str, model_id: str,
+                             expected_selection_fingerprint: str) -> Any:
+        pid = urllib.parse.quote(pipeline_id, safe="")
+        return self._model_mutation(
+            f"/api/models/queue/pipeline/{pid}",
+            params={"selected_model_id": model_id,
+                    "expected_selection_fingerprint": expected_selection_fingerprint},
+        )
+
+    def repair_model(self, pipeline_id: str, model_id: str) -> Any:
+        pid = urllib.parse.quote(pipeline_id, safe="")
+        mid = urllib.parse.quote(model_id, safe="")
+        return self._model_mutation(f"/api/models/{pid}/{mid}/repair")
+
+    def cancel_model_download(self, pipeline_id: str, model_id: str,
+                              expected_queue_entry_id: str) -> Any:
+        pid = urllib.parse.quote(pipeline_id, safe="")
+        mid = urllib.parse.quote(model_id, safe="")
+        return self._model_mutation(
+            f"/api/models/{pid}/{mid}/cancel",
+            params={"expected_queue_entry_id": expected_queue_entry_id},
+        )
+
     # ── batch workflows (thin HTTP; no Batch UUID in Render activity) ──
 
     def preflight_batch(self, body: Mapping[str, Any]) -> Any:
