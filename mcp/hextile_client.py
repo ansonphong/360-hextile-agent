@@ -6,6 +6,7 @@ No app logic — pure proxy helpers for the MCP server and Codex install.
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import uuid
@@ -261,6 +262,12 @@ class Client:
             return self.post_json(
                 f"/api/renders/{rid}/export", body, timeout=LONG_OPERATION_TIMEOUT_S
             )
+        except http.client.HTTPException as exc:
+            raise HextileClientError(
+                "Export outcome unknown; inspect the destination before a new attempt.",
+                body=str(exc),
+                kind="file_outcome_unknown",
+            ) from exc
         except HextileClientError as exc:
             if exc.kind == "app_down":
                 raise HextileClientError(

@@ -1,6 +1,7 @@
 """Mocked HTTP: export MCP tools proxy the APP door."""
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import sys
@@ -224,3 +225,23 @@ def test_file_export_transport_loss_is_one_attempt_unknown(tmp_path: Path) -> No
     assert "file_outcome_unknown" in json.dumps(result)
     assert len(_export_requests(seen)) == 1
     assert _export_requests(seen)[0][2] == 300.0
+
+
+def test_file_export_truncated_response_is_one_attempt_unknown(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+
+    class TruncatedResponse(_Resp):
+        def read(self) -> bytes:
+            raise http.client.IncompleteRead(b'{"paths":', 1)
+
+    def opener(req, timeout=None):  # noqa: ANN001
+        seen.setdefault("requests", []).append((req.full_url, req.data, timeout))
+        return TruncatedResponse()
+
+    server = HextileMcpServer(client=Client(base_url=BASE, opener=opener))
+    args = _file_args(tmp_path) | {"source_revision": "rev", "output_fingerprint": "fingerprint"}
+    result = server.call_tool("export_render_file", args)
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+    assert _export_requests(seen)[0][2] == LONG_OPERATION_TIMEOUT_S
