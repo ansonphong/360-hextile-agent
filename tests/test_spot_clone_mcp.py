@@ -58,6 +58,9 @@ def test_catalog_is_closed_by_saved_live_target_and_mask_source() -> None:
     assert saved["additionalProperties"] is live["additionalProperties"] is False
     assert saved["properties"]["target"] == {"const": "saved"}
     assert live["properties"]["target"] == {"const": "live"}
+    assert "prepared_operation_id" not in live["required"]
+    assert "expected_mask_fingerprint" not in live["required"]
+    assert {"prepared_operation_id", "expected_mask_fingerprint"} <= set(live["properties"])
     assert "mask" not in live["properties"]
     assert not {"path", "pixels", "force", "retry_with_new_id"} & set(saved["properties"])
     for variant in saved["properties"]["mask"]["oneOf"]:
