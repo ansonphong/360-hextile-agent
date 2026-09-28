@@ -66,6 +66,7 @@ EXPECTED_TOOLS = (
     "validate_config",
     "get_status",
     "get_gpu_diagnostics",
+    "get_seed_memory_advice",
     "get_render_config",
     "get_logs",
     "list_runs",
@@ -112,7 +113,7 @@ EXPECTED_TOOLS = (
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 51
+    assert len(EXPECTED_TOOLS) == 52
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -157,6 +158,7 @@ def test_open4_annotations_partition() -> None:
     assert "preflight_file_export" in _READ_ONLY
     assert "export_render_file" in _MUTATING
     assert "get_gpu_diagnostics" in _READ_ONLY
+    assert "get_seed_memory_advice" in _READ_ONLY
     assert "retry_run" in _MUTATING
     assert {"get_model_readiness", "get_model_download_queue"} <= _READ_ONLY
     assert {"install_model", "repair_model", "cancel_model_download"} <= _MUTATING
@@ -240,6 +242,51 @@ def test_gpu_diagnostics_tool_and_retry_mapping() -> None:
     ]
     assert _tool_schema("get_gpu_diagnostics")["properties"] == {}
     assert _tool_schema("retry_run")["properties"]["vram_recovery"]["type"] == "boolean"
+
+
+def test_seed_memory_advice_keeps_separate_samples_and_typed_errors() -> None:
+    seen: list[str] = []
+    gpu = {"card": {"free_gb": 8}, "accounting": {"nvml_sample_age_ms": 1200}}
+    advice = {"risk": "caution", "free_gb": 7.5, "total_gb": 16}
+
+    class Response:
+        status = 200
+
+        def __init__(self, data: Any) -> None:
+            self.data = data
+
+        def read(self) -> bytes:
+            return json.dumps(self.data).encode()
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        seen.append(req.full_url)
+        return Response(gpu if len(seen) == 1 else advice)
+
+    result = HextileMcpServer(client=Client(opener=opener))._get_seed_memory_advice({
+        "lora_path": "my lora", "width": 1600, "height": 800, "cpu_offload": True,
+    })
+    assert result == {"sampling": "separate", "gpu": gpu, "advice": advice}
+    assert result["gpu"]["card"]["free_gb"] != result["advice"]["free_gb"]
+    assert "nvml_sample_age_ms" not in result["advice"]
+    assert seen == [
+        "http://127.0.0.1:8000/api/processors/vram-status",
+        "http://127.0.0.1:8000/api/360-lora/memory-advice?lora_path=my+lora&width=1600&height=800&cpu_offload=True",
+    ]
+    assert _tool_schema("get_seed_memory_advice")["required"] == ["lora_path", "width", "height"]
+
+    def missing(_req: Any, timeout: Any = None) -> Any:
+        raise urllib.error.HTTPError("/memory-advice", 422, "bad preset", {}, io.BytesIO(b"bad preset"))
+
+    with pytest.raises(HextileClientError) as caught:
+        Client(opener=missing).get_seed_memory_advice("lora", 1600, 800)
+    assert caught.value.status_code == 422
+    assert caught.value.kind == "http"
 
 
 def test_model_tool_schemas_are_closed_and_targeted() -> None:
@@ -604,13 +651,22 @@ def test_seed_client_uses_exact_job_routes_and_preserves_result() -> None:
         "base_model": "sdxl", "num_variations": 4,
     }
     assert seen[0][3] == 30.0
+    client.generate_seed(
+        "look", request_id=request_id, lora_path="lora", base_model="sdxl", n=4,
+        width=1600, height=800, resolution_preset="1600x800", cpu_offload=True,
+        allow_low_vram=True,
+    )
+    assert seen[1][2] == {
+        **seen[0][2], "width": 1600, "height": 800,
+        "resolution_preset": "1600x800", "cpu_offload": True, "allow_low_vram": True,
+    }
     assert client.get_seed_job(request_id) == receipt
-    assert seen[1][0:2] == ("GET", f"http://127.0.0.1:8000/api/360-lora/jobs/{request_id}")
+    assert seen[2][0:2] == ("GET", f"http://127.0.0.1:8000/api/360-lora/jobs/{request_id}")
     client.cancel_seed(request_id)
-    assert seen[2][0:2] == ("POST", f"http://127.0.0.1:8000/api/360-lora/jobs/{request_id}/cancel")
+    assert seen[3][0:2] == ("POST", f"http://127.0.0.1:8000/api/360-lora/jobs/{request_id}/cancel")
     with pytest.raises(HextileClientError, match="canonical UUID"):
         client.generate_seed("look", request_id="bad-id", lora_path="lora", base_model="sdxl")
-    assert len(seen) == 3
+    assert len(seen) == 4
 
 
 def test_seed_tools_require_exact_ids_and_activity_keeps_seed_out_of_run() -> None:
@@ -649,6 +705,31 @@ def test_seed_tools_require_exact_ids_and_activity_keeps_seed_out_of_run() -> No
     assert {event["seed"]["job_id"] for event in posted} == {request_id}
     assert not any("run" in event for event in posted)
     assert [event["seed"].get("status") for event in posted if event["phase"] != "started"] == ["accepted", "partial", "cancelling"]
+
+
+def test_seed_tool_forwards_only_explicit_options() -> None:
+    client = mock.Mock()
+    server = HextileMcpServer(client=client)
+    base = {
+        "request_id": "b7519ceb-e344-464d-923c-ef16e02050e6",
+        "prompt": "look", "lora_path": "lora", "base_model": "sdxl",
+    }
+    server._generate_seed(base)
+    assert client.generate_seed.call_args == mock.call(
+        "look", request_id=base["request_id"], lora_path="lora", base_model="sdxl", n=4,
+    )
+    server._generate_seed({
+        **base, "width": 1600, "height": 800, "resolution_preset": "1600x800",
+        "cpu_offload": False, "allow_low_vram": True, "approved": True,
+    })
+    assert client.generate_seed.call_args == mock.call(
+        "look", request_id=base["request_id"], lora_path="lora", base_model="sdxl", n=4,
+        width=1600, height=800, resolution_preset="1600x800",
+        cpu_offload=False, allow_low_vram=True,
+    )
+    props = _tool_schema("generate_seed")["properties"]
+    assert {"resolution_preset", "cpu_offload", "allow_low_vram"} <= set(props)
+    assert "approved" not in props
 
 
 def test_uncertain_seed_ack_names_recoverable_job_id() -> None:

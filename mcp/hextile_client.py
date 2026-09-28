@@ -523,6 +523,22 @@ class Client:
 
     # ── seed ────────────────────────────────────────────────────────────
 
+    def get_seed_memory_advice(
+        self, lora_path: str, width: int, height: int, *, cpu_offload: bool = False
+    ) -> Any:
+        """Read two independent APP samples; neither reserves VRAM."""
+        gpu = self.get_gpu_diagnostics()
+        advice = self.get_json(
+            "/api/360-lora/memory-advice",
+            params={
+                "lora_path": lora_path,
+                "width": width,
+                "height": height,
+                "cpu_offload": cpu_offload,
+            },
+        )
+        return {"sampling": "separate", "gpu": gpu, "advice": advice}
+
     def generate_seed(
         self,
         prompt: str,

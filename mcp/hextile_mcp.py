@@ -53,6 +53,7 @@ TOOL_NAMES = (
     "validate_config",
     "get_status",
     "get_gpu_diagnostics",
+    "get_seed_memory_advice",
     "get_render_config",
     "get_logs",
     "list_runs",
@@ -105,6 +106,7 @@ _READ_ONLY = frozenset(
         "validate_config",
         "get_status",
         "get_gpu_diagnostics",
+        "get_seed_memory_advice",
         "get_render_config",
         "get_logs",
         "list_runs",
@@ -482,6 +484,19 @@ TOOLS: list[dict[str, Any]] = [
         {},
     ),
     _tool_def(
+        "get_seed_memory_advice",
+        "Read separate GPU status and APP memory-pressure advice for one listed "
+        "360-LoRA resolution. The GPU sample age applies only to gpu; advice "
+        "samples memory independently and neither result guarantees job fit.",
+        {
+            "lora_path": {"type": "string", "description": "Relative path from list_360_loras"},
+            "width": {"type": "integer", "description": "Listed preset width"},
+            "height": {"type": "integer", "description": "Listed preset height"},
+            "cpu_offload": {"type": "boolean", "description": "Estimate with explicit CPU offload; default false"},
+        },
+        required=["lora_path", "width", "height"],
+    ),
+    _tool_def(
         "get_render_config",
         "Read the producing .hextile.json for a render (GET /api/renders/{id}/config). Read-only.",
         {
@@ -578,6 +593,18 @@ TOOLS: list[dict[str, Any]] = [
             "height": {
                 "type": "integer",
                 "description": "Output height (APP default 800)",
+            },
+            "resolution_preset": {
+                "type": "string",
+                "description": "Exact listed widthxheight preset for this LoRA; APP validates it",
+            },
+            "cpu_offload": {
+                "type": "boolean",
+                "description": "Explicit CPU offload for installed SDXL/SD1.5 weights only",
+            },
+            "allow_low_vram": {
+                "type": "boolean",
+                "description": "Explicit request-local low-free-memory admission override; never inferred from advice",
             },
             "seed": {
                 "type": "integer",
@@ -1147,7 +1174,7 @@ TOOLS: list[dict[str, Any]] = [
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 51
+assert len(TOOL_NAMES) == 52
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1261,6 +1288,7 @@ class HextileMcpServer:
             "validate_config": self._validate_config,
             "get_status": self._get_status,
             "get_gpu_diagnostics": self._get_gpu_diagnostics,
+            "get_seed_memory_advice": self._get_seed_memory_advice,
             "get_render_config": self._get_render_config,
             "get_logs": self._get_logs,
             "list_runs": self._list_runs,
@@ -1787,6 +1815,16 @@ class HextileMcpServer:
     def _get_gpu_diagnostics(self, args: dict[str, Any]) -> Any:
         return self.client.get_gpu_diagnostics()
 
+    def _get_seed_memory_advice(self, args: dict[str, Any]) -> Any:
+        if not all(key in args for key in ("lora_path", "width", "height")):
+            raise HextileClientError("lora_path, width, and height are required", kind="other")
+        return self.client.get_seed_memory_advice(
+            str(args["lora_path"]),
+            int(args["width"]),
+            int(args["height"]),
+            cpu_offload=args.get("cpu_offload") is True,
+        )
+
     def _get_render_config(self, args: dict[str, Any]) -> Any:
         render_id = args.get("render_id")
         if not render_id:
@@ -1842,6 +1880,9 @@ class HextileMcpServer:
             "trigger_word",
             "width",
             "height",
+            "resolution_preset",
+            "cpu_offload",
+            "allow_low_vram",
             "seed",
             "num_inference_steps",
             "guidance_scale",
