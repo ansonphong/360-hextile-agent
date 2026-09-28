@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -85,6 +86,8 @@ TOOL_NAMES = (
     "get_unreal_export_catalog",
     "preflight_unreal_export",
     "export_to_unreal_project",
+    "preflight_file_export",
+    "export_render_file",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -114,6 +117,7 @@ _READ_ONLY = frozenset(
         "get_batch_items",
         "get_unreal_export_catalog",
         "preflight_unreal_export",
+        "preflight_file_export",
     }
 )
 _MUTATING = frozenset(
@@ -138,6 +142,7 @@ _MUTATING = frozenset(
         "retry_batch",
         "import_batch_outputs",
         "export_to_unreal_project",
+        "export_render_file",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -187,6 +192,18 @@ _PRIVATE_ARGUMENT_KEYS = frozenset(
         "x-hextile-copilot-token",
         "x-hextile-op",
     }
+)
+_FILE_EXPORT_OPTIONS = frozenset({
+    "layout", "width", "height", "fov", "pan", "tilt", "roll",
+    "jpeg_quality", "include_360_metadata",
+})
+_FILE_EXPORT_REQUIRED = (
+    "render_id", "source_node_id", "folder_path", "output_name",
+    "projection", "encoding",
+)
+_WINDOWS_DEVICE_STEM = re.compile(
+    r"^(?:CON|PRN|AUX|NUL|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)",
+    re.IGNORECASE,
 )
 PREFLIGHT_POLL_TIMEOUT_S = 60.0
 PREFLIGHT_POLL_INTERVAL_S = 2.0
@@ -251,6 +268,28 @@ def _tool_def(
         "inputSchema": schema,
         "annotations": _annotations(name),
     }
+
+
+_FILE_EXPORT_PROPERTIES: dict[str, Any] = {
+    "render_id": {"type": "string"},
+    "source_node_id": {"type": "string"},
+    "folder_path": {"type": "string", "description": "Selected existing local folder"},
+    "output_name": {"type": "string", "description": "Windows-safe basename only"},
+    "projection": {"type": "string", "enum": [
+        "equirectangular", "cubemap_cross", "fulldome", "fulldome_angular",
+        "rectilinear", "stereographic",
+    ]},
+    "encoding": {"type": "string", "enum": ["png", "jpg", "hdr", "exr"]},
+    "layout": {"type": "string", "enum": ["cross", "six_faces"]},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "fov": {"type": "number"},
+    "pan": {"type": "number"},
+    "tilt": {"type": "number"},
+    "roll": {"type": "number"},
+    "jpeg_quality": {"type": "integer", "minimum": 1, "maximum": 100},
+    "include_360_metadata": {"type": "boolean"},
+}
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -1021,11 +1060,30 @@ TOOLS: list[dict[str, Any]] = [
         },
         required=["render_id", "unreal_project"],
     ),
+    _tool_def(
+        "preflight_file_export",
+        "Read-only check of an exact graph-node export into a selected folder. "
+        "Returns source_revision, output_fingerprint, exact paths and blockers; no writes.",
+        _FILE_EXPORT_PROPERTIES,
+        required=list(_FILE_EXPORT_REQUIRED),
+    ),
+    _tool_def(
+        "export_render_file",
+        "Create-only ordinary render export. Requires the source_revision and "
+        "output_fingerprint from preflight plus fresh user approval. One 300s "
+        "attempt; after a connection loss inspect the destination before a new attempt.",
+        {
+            **_FILE_EXPORT_PROPERTIES,
+            "source_revision": {"type": "string"},
+            "output_fingerprint": {"type": "string"},
+        },
+        required=[*_FILE_EXPORT_REQUIRED, "source_revision", "output_fingerprint"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 44
+assert len(TOOL_NAMES) == 46
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1172,6 +1230,8 @@ class HextileMcpServer:
             "get_unreal_export_catalog": self._get_unreal_export_catalog,
             "preflight_unreal_export": self._preflight_unreal_export,
             "export_to_unreal_project": self._export_to_unreal_project,
+            "preflight_file_export": self._preflight_file_export,
+            "export_render_file": self._export_render_file,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -1460,6 +1520,55 @@ class HextileMcpServer:
     def _export_to_unreal_project(self, args: dict[str, Any]) -> Any:
         render_id = str(args.get("render_id") or "")
         return self.client.export_to_unreal_project(render_id, self._unreal_export_body(args))
+
+    def _file_export_body(self, args: dict[str, Any], *, export: bool) -> dict[str, Any]:
+        allowed = set(_FILE_EXPORT_REQUIRED) | _FILE_EXPORT_OPTIONS
+        if export:
+            allowed.update(("source_revision", "output_fingerprint"))
+        unexpected = set(args) - allowed
+        if unexpected:
+            raise HextileClientError(
+                f"Unsupported file export argument: {sorted(unexpected)[0]}", kind="other"
+            )
+        for key in _FILE_EXPORT_REQUIRED + (("source_revision", "output_fingerprint") if export else ()):
+            if not isinstance(args.get(key), str) or not args[key]:
+                raise HextileClientError(f"{key} is required", kind="other")
+        leaf = args["output_name"]
+        if (leaf in (".", "..") or leaf.endswith((".", " "))
+                or any(ord(char) < 32 or char in '<>:"/\\|?*' for char in leaf)
+                or _WINDOWS_DEVICE_STEM.match(leaf)):
+            raise HextileClientError("unsafe output_name", kind="other")
+        folder = Path(args["folder_path"])
+        if not folder.is_absolute() or not folder.is_dir():
+            raise HextileClientError("folder_path must be an existing absolute folder", kind="other")
+        parent = folder.resolve(strict=True)
+        destination = parent / leaf
+        if destination.resolve(strict=False).parent != parent:
+            raise HextileClientError("output_name escapes selected folder", kind="other")
+        body = {
+            "source_node_id": args["source_node_id"],
+            "destination": str(destination),
+            "projection": args["projection"],
+            "encoding": args["encoding"],
+            **{key: args[key] for key in _FILE_EXPORT_OPTIONS if key in args},
+        }
+        if export:
+            body.update({
+                "create_only": True,
+                "expected_source_revision": args["source_revision"],
+                "expected_output_fingerprint": args["output_fingerprint"],
+            })
+        return body
+
+    def _preflight_file_export(self, args: dict[str, Any]) -> Any:
+        return self.client.preflight_file_export(
+            args["render_id"], self._file_export_body(args, export=False)
+        )
+
+    def _export_render_file(self, args: dict[str, Any]) -> Any:
+        return self.client.export_render_file(
+            args["render_id"], self._file_export_body(args, export=True)
+        )
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

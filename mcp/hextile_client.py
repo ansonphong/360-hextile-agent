@@ -18,7 +18,7 @@ from typing import Any, Mapping, Optional
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT_S = 30.0
-LONG_OPERATION_TIMEOUT_S = 300.0  # Unreal export and sequence extraction
+LONG_OPERATION_TIMEOUT_S = 300.0  # Export and sequence extraction
 
 APP_DOWN_MSG = (
     "360 Hextile isn't running. Launch 360 Hextile, then retry."
@@ -250,6 +250,26 @@ class Client:
     def preflight_unreal_export(self, render_id: str, body: Mapping[str, Any]) -> Any:
         rid = urllib.parse.quote(render_id, safe="")
         return self.post_json(f"/api/renders/{rid}/export/preflight", body)
+
+    def preflight_file_export(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        return self.post_json(f"/api/renders/{rid}/export/file-preflight", body)
+
+    def export_render_file(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        try:
+            return self.post_json(
+                f"/api/renders/{rid}/export", body, timeout=LONG_OPERATION_TIMEOUT_S
+            )
+        except HextileClientError as exc:
+            if exc.kind == "app_down":
+                raise HextileClientError(
+                    "Export outcome unknown; inspect the destination before a new attempt.",
+                    status_code=exc.status_code,
+                    body=exc.body,
+                    kind="file_outcome_unknown",
+                ) from exc
+            raise
 
     def export_to_unreal_project(self, render_id: str, body: Mapping[str, Any]) -> Any:
         rid = urllib.parse.quote(render_id, safe="")

@@ -1,4 +1,4 @@
-"""Mocked HTTP: Unreal export MCP tools proxy the APP door."""
+"""Mocked HTTP: export MCP tools proxy the APP door."""
 from __future__ import annotations
 
 import io
@@ -16,11 +16,11 @@ MCP_DIR = ROOT / "mcp"
 sys.path.insert(0, str(MCP_DIR))
 
 from hextile_client import (  # noqa: E402
-    GENERATE_TIMEOUT_S,
+    LONG_OPERATION_TIMEOUT_S,
     Client,
     HextileClientError,
 )
-from hextile_mcp import HextileMcpServer, TOOL_NAMES  # noqa: E402
+from hextile_mcp import HextileMcpServer, TOOL_NAMES, TOOLS  # noqa: E402
 
 BASE = "http://127.0.0.1:8000"
 
@@ -45,6 +45,7 @@ class _Resp:
 def _recorder(seen: dict[str, Any], payload: Any = None):
     def opener(req, timeout=None):  # noqa: ANN001
         seen.setdefault("urls", []).append(req.full_url)
+        seen.setdefault("requests", []).append((req.full_url, req.data, timeout))
         seen["url"] = req.full_url
         seen["data"] = req.data
         seen["timeout"] = timeout
@@ -58,6 +59,7 @@ def _recorder(seen: dict[str, Any], payload: Any = None):
 def _timeout_opener(seen: dict[str, Any]):
     def opener(req, timeout=None):  # noqa: ANN001
         seen["url"] = req.full_url
+        seen.setdefault("requests", []).append((req.full_url, req.data, timeout))
         seen["timeout"] = timeout
         seen["calls"] = seen.get("calls", 0) + 1
         raise TimeoutError("timed out")
@@ -105,7 +107,7 @@ def test_export_keeps_windows_path_and_300s_timeout() -> None:
     assert "destination" not in posted
     assert posted["unreal_project"]["uproject_path"] == win
     assert "\\mnt\\" not in posted["unreal_project"]["uproject_path"]
-    assert seen["timeout"] == GENERATE_TIMEOUT_S == 300.0
+    assert seen["timeout"] == LONG_OPERATION_TIMEOUT_S == 300.0
 
 
 def test_export_timeout_is_one_attempt_unknown() -> None:
@@ -137,8 +139,88 @@ def test_mcp_handlers_proxy_and_forward_outcome() -> None:
     assert any(u.endswith("/api/renders/r1/export") for u in seen.get("urls", []))
 
 
-def test_tool_names_include_unreal() -> None:
+def test_tool_names_include_export() -> None:
     assert "get_unreal_export_catalog" in TOOL_NAMES
     assert "preflight_unreal_export" in TOOL_NAMES
     assert "export_to_unreal_project" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 42
+    assert "preflight_file_export" in TOOL_NAMES
+    assert "export_render_file" in TOOL_NAMES
+    assert len(TOOL_NAMES) == 46
+
+
+def _file_args(folder: Path) -> dict[str, Any]:
+    return {
+        "render_id": "render/1", "source_node_id": "node-1",
+        "folder_path": str(folder), "output_name": "sky.jpg",
+        "projection": "equirectangular", "encoding": "jpg",
+        "include_360_metadata": False,
+    }
+
+
+def _export_requests(seen: dict[str, Any]) -> list[tuple[str, Any, Any]]:
+    return [request for request in seen.get("requests", [])
+            if "/api/renders/" in request[0]]
+
+
+def test_file_preflight_and_export_proxy_exact_body(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+    server = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen)))
+    args = _file_args(tmp_path)
+    assert not server.call_tool("preflight_file_export", args)["isError"]
+    preflight_url, preflight_data, preflight_timeout = _export_requests(seen)[0]
+    assert preflight_url == f"{BASE}/api/renders/render%2F1/export/file-preflight"
+    preflight_body = json.loads(preflight_data)
+    assert preflight_body == {
+        "source_node_id": "node-1", "destination": str(tmp_path.resolve() / "sky.jpg"),
+        "projection": "equirectangular", "encoding": "jpg", "include_360_metadata": False,
+    }
+    assert preflight_timeout == 30.0
+    args.update(source_revision="source-digest", output_fingerprint="approved-fingerprint")
+    assert not server.call_tool("export_render_file", args)["isError"]
+    export_url, export_data, export_timeout = _export_requests(seen)[1]
+    assert export_url == f"{BASE}/api/renders/render%2F1/export"
+    assert json.loads(export_data) == {
+        **preflight_body, "create_only": True,
+        "expected_source_revision": "source-digest",
+        "expected_output_fingerprint": "approved-fingerprint",
+    }
+    assert export_timeout == LONG_OPERATION_TIMEOUT_S
+    assert len(_export_requests(seen)) == 2
+
+
+def test_file_export_schema_and_direct_handler_reject_extra_fields(tmp_path: Path) -> None:
+    schemas = {tool["name"]: tool for tool in TOOLS}
+    for name in ("preflight_file_export", "export_render_file"):
+        schema = schemas[name]["inputSchema"]
+        assert schema["additionalProperties"] is False
+        assert not {"hdri", "unreal_project", "destination", "overwrite"} & set(schema["properties"])
+    assert schemas["preflight_file_export"]["annotations"]["readOnlyHint"] is True
+    assert schemas["export_render_file"]["annotations"]["readOnlyHint"] is False
+    assert "output_fingerprint" in schemas["export_render_file"]["inputSchema"]["required"]
+    seen: dict[str, Any] = {}
+    server = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen)))
+    args = _file_args(tmp_path) | {"source_revision": "rev", "output_fingerprint": "fingerprint"}
+    for field in ("hdri", "unreal_project", "destination", "overwrite", "create_only"):
+        assert server.call_tool("export_render_file", args | {field: "forbidden"})["isError"]
+    assert server.call_tool("export_render_file", _file_args(tmp_path))["isError"]
+    assert _export_requests(seen) == []
+
+
+@pytest.mark.parametrize("leaf", ["../sky.jpg", r"C:\sky.jpg", "sky:stream.jpg", "CON.jpg", "LPT¹.jpg", "sky.jpg ", "sky.jpg."])
+def test_file_export_rejects_unsafe_leaf_before_dispatch(tmp_path: Path, leaf: str) -> None:
+    seen: dict[str, Any] = {}
+    server = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen)))
+    args = _file_args(tmp_path) | {"output_name": leaf}
+    assert server.call_tool("preflight_file_export", args)["isError"]
+    assert _export_requests(seen) == []
+
+
+def test_file_export_transport_loss_is_one_attempt_unknown(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+    server = HextileMcpServer(client=Client(base_url=BASE, opener=_timeout_opener(seen)))
+    args = _file_args(tmp_path) | {"source_revision": "rev", "output_fingerprint": "fingerprint"}
+    result = server.call_tool("export_render_file", args)
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+    assert _export_requests(seen)[0][2] == 300.0

@@ -155,6 +155,12 @@ Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
 Instruction surface: **`skills/hextile/SKILL.md`** (canonical hub) plus **`skills/hextile-upres/SKILL.md`**.  
 Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SKILL only.
 
+### Ordinary render file export
+
+Call `preflight_file_export` with an exact `render_id`, `source_node_id`, selected existing `folder_path`, Windows-safe basename `output_name`, `projection`, and `encoding`. It performs no writes and returns the source revision, exact output paths, blockers, and output fingerprint. Review those paths and obtain approval for the exact options before calling `export_render_file` with the same arguments plus the returned `source_revision` and `output_fingerprint`.
+
+`export_render_file` calls the app's encoder once with `create_only: true`; an existing destination returns a collision instead of being replaced. If the source or derived output names changed, preflight again and obtain new approval. A timeout or lost connection leaves the outcome unknown: inspect the destination before considering a new attempt. These tools accept neither HDRI nor Unreal-project export arguments and never encode files in the plugin.
+
 ## App not running
 
 Every tool returns a structured error, roughly:
