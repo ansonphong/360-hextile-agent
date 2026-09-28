@@ -19,7 +19,7 @@ from typing import Any, Mapping, Optional
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT_S = 30.0
-LONG_OPERATION_TIMEOUT_S = 300.0  # Export and sequence extraction
+LONG_OPERATION_TIMEOUT_S = 300.0  # Export, sequence extraction, and local vision
 
 APP_DOWN_MSG = (
     "360 Hextile isn't running. Launch 360 Hextile, then retry."
@@ -244,6 +244,12 @@ class Client:
     def get_capabilities(self) -> Any:
         """GET /api/workflows/capabilities."""
         return self.get_json("/api/workflows/capabilities")
+
+    def describe_image(self, body: Mapping[str, Any]) -> Any:
+        """Ask APP to caption one exact local source; never open image bytes here."""
+        return self.post_json(
+            "/api/prompts/describe-source", body, timeout=LONG_OPERATION_TIMEOUT_S
+        )
 
     def get_unreal_export_catalog(self) -> Any:
         return self.get_json("/api/renders/unreal-export/catalog")

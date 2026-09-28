@@ -10,6 +10,7 @@ Catalog + persist + run + monitor + config + seed + models + guides + live conte
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -45,6 +46,7 @@ TOOL_NAMES = (
     "list_workflows",
     "get_workflow",
     "get_capabilities",
+    "describe_image",
     "get_live_context",
     "apply_config_delta",
     "save_workflow",
@@ -137,6 +139,7 @@ _MUTATING = frozenset(
         "save_workflow",
         "delete_workflow",
         "run_workflow",
+        "describe_image",
         "generate_seed",
         "cancel_run",
         "retry_run",
@@ -336,6 +339,48 @@ TOOLS: list[dict[str, Any]] = [
         "Handshake: GET /api/workflows/capabilities "
         "(workflow_api_version + features).",
         {},
+    ),
+    _tool_def(
+        "describe_image",
+        "Describe one exact local image or equirectangular crop using APP's local vision. "
+        "Requires approval for local compute/GPU; returns text, never image bytes. "
+        "Allow up to 300 seconds. No URL, base64, or current-selection fallback.",
+        {
+            "source": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"const": "render_node"},
+                            "render_id": {"type": "string", "minLength": 1},
+                            "node_id": {"type": "string", "minLength": 1},
+                        },
+                        "required": ["kind", "render_id", "node_id"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"const": "local_file"},
+                            "path": {"type": "string", "minLength": 1},
+                        },
+                        "required": ["kind", "path"],
+                        "additionalProperties": False,
+                    },
+                ],
+            },
+            "crop": {
+                "type": "object",
+                "properties": {
+                    "yaw": {"type": "number", "minimum": -180, "maximum": 180},
+                    "pitch": {"type": "number", "minimum": -90, "maximum": 90},
+                    "fov": {"type": "number", "minimum": 1, "maximum": 150},
+                },
+                "required": ["yaw", "pitch", "fov"],
+                "additionalProperties": False,
+            },
+        },
+        required=["source"],
     ),
     _tool_def(
         "get_live_context",
@@ -1197,7 +1242,7 @@ TOOLS: list[dict[str, Any]] = [
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 53
+assert len(TOOL_NAMES) == 54
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1303,6 +1348,7 @@ class HextileMcpServer:
             "list_workflows": self._list_workflows,
             "get_workflow": self._get_workflow,
             "get_capabilities": self._get_capabilities,
+            "describe_image": self._describe_image,
             "get_live_context": self._get_live_context,
             "apply_config_delta": self._apply_config_delta,
             "save_workflow": self._save_workflow,
@@ -1632,6 +1678,50 @@ class HextileMcpServer:
 
     def _get_capabilities(self, _args: dict[str, Any]) -> Any:
         return self.client.get_capabilities()
+
+    def _describe_image(self, args: dict[str, Any]) -> Any:
+        if set(args) - {"source", "crop"}:
+            raise HextileClientError("Unsupported describe_image argument", kind="other")
+        source = args.get("source")
+        if not isinstance(source, dict):
+            raise HextileClientError("source is required", kind="other")
+        kind = source.get("kind")
+        if kind == "render_node":
+            keys = {"kind", "render_id", "node_id"}
+            if set(source) != keys or any(
+                not isinstance(source[key], str) or not source[key] for key in ("render_id", "node_id")
+            ):
+                raise HextileClientError("Exact render_id and node_id are required", kind="other")
+        elif kind == "local_file":
+            if (set(source) != {"kind", "path"} or not isinstance(source.get("path"), str)
+                    or not Path(source["path"]).is_absolute()):
+                raise HextileClientError("An absolute local_file path is required", kind="other")
+        else:
+            raise HextileClientError("Unsupported description source", kind="other")
+
+        body: dict[str, Any] = {"source": dict(source)}
+        if "crop" in args:
+            crop = args["crop"]
+            bounds = {"yaw": (-180, 180), "pitch": (-90, 90), "fov": (1, 150)}
+            if (not isinstance(crop, dict) or set(crop) != set(bounds) or any(
+                isinstance(crop[key], bool) or not isinstance(crop[key], (int, float))
+                or not math.isfinite(crop[key]) or not lo <= crop[key] <= hi
+                for key, (lo, hi) in bounds.items()
+            )):
+                raise HextileClientError("Invalid description crop", kind="other")
+            body["crop"] = dict(crop)
+
+        result = self.client.describe_image(body)
+        mode = "crop" if "crop" in body else "photo"
+        if (not isinstance(result, dict) or result.get("mode") != mode
+                or not isinstance(result.get("prompt"), str) or not result["prompt"].strip()
+                or not isinstance(result.get("image_signature"), str)):
+            raise HextileClientError("Invalid description response from APP", kind="other")
+        # Construct the public result from known text fields; never relay raster extras.
+        return {
+            "prompt": result["prompt"], "source": body["source"], "mode": mode,
+            "crop": body.get("crop"), "image_signature": result["image_signature"],
+        }
 
     def _get_unreal_export_catalog(self, _args: dict[str, Any]) -> Any:
         return self.client.get_unreal_export_catalog()

@@ -119,13 +119,14 @@ Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
 | **Grok** | Catalog SHA pin in `ansonphong/360-hextile-plugins`. After that pin is on GitHub: `grok plugin marketplace update` then `grok plugin update hextile-agent`. |
 | **Codex** | `python3 codex/install.py` writes `~/.agents/skills/hextile-upres/SKILL.md`. |
 
-## Tools (28)
+## Selected tools
 
 | Tool | HTTP / source |
 |------|----------------|
 | `list_workflows` | `GET /api/workflows` |
 | `get_workflow` | `GET /api/workflows/{origin}/{id}` |
 | `get_capabilities` | `GET /api/workflows/capabilities` |
+| `describe_image` | `POST /api/prompts/describe-source` (local vision, 300s) |
 | `get_live_context` | `GET /api/agent/live-context` |
 | `apply_config_delta` | `POST /api/agent/apply-live` |
 | `save_workflow` | `POST /api/workflows/{user\|project}` |
@@ -160,6 +161,10 @@ Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SK
 Call `preflight_file_export` with an exact `render_id`, `source_node_id`, selected existing `folder_path`, Windows-safe basename `output_name`, `projection`, and `encoding`. It performs no writes and returns the source revision, exact output paths, blockers, and output fingerprint. Review those paths and obtain approval for the exact options before calling `export_render_file` with the same arguments plus the returned `source_revision` and `output_fingerprint`.
 
 `export_render_file` calls the app's encoder once with `create_only: true`; an existing destination returns a collision instead of being replaced. If the source or derived output names changed, preflight again and obtain new approval. A timeout or lost connection leaves the outcome unknown: inspect the destination before considering a new attempt. These tools accept neither HDRI nor Unreal-project export arguments and never encode files in the plugin.
+
+### Describe an exact local image
+
+`describe_image` accepts `source: {"kind":"render_node","render_id":"...","node_id":"..."}` or `source: {"kind":"local_file","path":"/absolute/image.png"}`. Optionally add `crop: {"yaw":15,"pitch":-10,"fov":70}` for a 2:1 equirectangular panorama. The app resolves the exact source and runs local vision; the MCP proxy never opens the image. Approve the local compute/GPU call before invoking it. The result is text (`prompt`, source identity, mode, crop and image signature), never raster data. URLs, base64 and implicit current-selection sources are not accepted.
 
 ## App not running
 

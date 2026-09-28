@@ -125,3 +125,56 @@ def test_internal_meta_headers_and_activity_suppression() -> None:
     )
     assert response is not None and response["result"]["isError"] is False
     assert seen == [("headers", "child-secret", "op_1"), ("status", "run_1", None)]
+
+
+def test_describe_image_exact_body_timeout_and_text_only_result() -> None:
+    sys.path.insert(0, str(ROOT / "mcp"))
+    from hextile_client import Client
+    from hextile_mcp import HextileMcpServer
+
+    seen = []
+
+    class Response:
+        status = 200
+
+        def read(self):  # noqa: ANN201
+            return json.dumps({
+                "prompt": "A mountain at dusk", "mode": "crop",
+                "image_signature": "sha256-test", "image_base64": "SHOULD_NOT_LEAK",
+            }).encode()
+
+        def __enter__(self):  # noqa: ANN201
+            return self
+
+        def __exit__(self, *args):  # noqa: ANN002, ANN201
+            return None
+
+    def opener(req, timeout):  # noqa: ANN001, ANN201
+        seen.append((req.get_method(), req.full_url, json.loads(req.data), timeout))
+        return Response()
+
+    server = HextileMcpServer(client=Client(opener=opener), child_token="test")
+    source = {"kind": "render_node", "render_id": "render_1", "node_id": "node_2"}
+    crop = {"yaw": 15, "pitch": -10, "fov": 70}
+    result = server.call_tool("describe_image", {"source": source, "crop": crop})
+    assert result["isError"] is False
+    assert seen == [(
+        "POST", "http://127.0.0.1:8000/api/prompts/describe-source",
+        {"source": source, "crop": crop}, 300.0,
+    )]
+    assert len(result["content"]) == 1 and result["content"][0]["type"] == "text"
+    payload = json.loads(result["content"][0]["text"])
+    assert payload == {
+        "prompt": "A mountain at dusk", "source": source, "mode": "crop",
+        "crop": crop, "image_signature": "sha256-test",
+    }
+    assert "SHOULD_NOT_LEAK" not in result["content"][0]["text"]
+
+    for rejected in (
+        {"source": {**source, "image_base64": "AA=="}},
+        {"source": {"kind": "local_file", "path": "https://example.com/image.jpg"}},
+        {"source": source, "crop": {**crop, "bitmap": "AA=="}},
+        {"source": source, "image_base64": "AA=="},
+    ):
+        assert server.call_tool("describe_image", rejected)["isError"] is True
+    assert len(seen) == 1

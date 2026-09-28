@@ -59,6 +59,7 @@ EXPECTED_TOOLS = (
     "list_workflows",
     "get_workflow",
     "get_capabilities",
+    "describe_image",
     "get_live_context",
     "apply_config_delta",
     "save_workflow",
@@ -115,7 +116,7 @@ EXPECTED_TOOLS = (
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 53
+    assert len(EXPECTED_TOOLS) == 54
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -159,6 +160,7 @@ def test_open4_annotations_partition() -> None:
     assert "export_to_unreal_project" in _MUTATING
     assert "preflight_file_export" in _READ_ONLY
     assert "export_render_file" in _MUTATING
+    assert "describe_image" in _MUTATING
     assert "get_gpu_diagnostics" in _READ_ONLY
     assert "search_library_prompts" in _READ_ONLY
     assert "get_seed_memory_advice" in _READ_ONLY

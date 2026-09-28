@@ -51,6 +51,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_guide` | Schema, practices, recipes, website index | no |
 | `list_workflows` | Discover templates | no |
 | `get_workflow` | Read one template before override or clone | no |
+| `describe_image` | Describe an exact local file or render graph node, optionally at a 2:1 panorama crop pose; local vision/GPU requires approval and returns text only | **yes** |
 | `save_workflow` | Persist a **new** id on user/project | **yes** |
 | `delete_workflow` | Remove a user/project workflow | **yes** |
 | `validate_config` | Dry-run merge+validate (terraform plan) | no |
@@ -239,7 +240,7 @@ curl -s http://127.0.0.1:8000/api/360-lora/jobs/00000000-0000-4000-8000-00000000
 
 ## Not in this plugin
 
-`start_wizard`, `compile_config`, `describe_image`, `upscale_image`, `list_worlds`, `list_presets`, run-ledger resume, in-place workflow UPDATE, Pattern generate. Do not invent those tools. Batch is the eleven `*_batch*` tools above — not `run_workflow` per file, not a Sequence, not `/api/batch-convert`. Never put a Batch job id into `get_status` / `cancel_run`.
+`start_wizard`, `compile_config`, `upscale_image`, `list_worlds`, `list_presets`, run-ledger resume, in-place workflow UPDATE, Pattern generate. Do not invent those tools. Batch is the eleven `*_batch*` tools above — not `run_workflow` per file, not a Sequence, not `/api/batch-convert`. Never put a Batch job id into `get_status` / `cancel_run`.
 
 ## Min app version
 
