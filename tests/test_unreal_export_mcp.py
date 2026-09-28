@@ -322,6 +322,26 @@ def test_file_export_unusable_six_face_receipt_is_unknown(tmp_path: Path, last_l
     assert len(_export_requests(seen)) == 1
 
 
+@pytest.mark.parametrize("alias", ["duplicate_separator", "trailing_space"])
+def test_file_export_aliased_six_face_receipt_is_unknown(tmp_path: Path, alias: str) -> None:
+    seen: dict[str, Any] = {}
+    folder = tmp_path.resolve() / "faces"
+    paths = [str(folder / f"sky_{face}.png") for face in ("px", "nx", "py", "ny", "pz")]
+    paths.append(
+        str(folder) + "//sky_px.png" if alias == "duplicate_separator" else str(folder / "sky_nz.png ")
+    )
+    args = _file_args(tmp_path) | {
+        "output_name": "faces", "projection": "cubemap_cross", "encoding": "png",
+        "layout": "six_faces", "source_revision": "rev", "output_fingerprint": "fingerprint",
+    }
+    result = HextileMcpServer(
+        client=Client(base_url=BASE, opener=_recorder(seen, {"outcome": "complete", "paths": paths}))
+    ).call_tool("export_render_file", args)
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+
+
 def test_file_export_six_face_escape_is_unknown(tmp_path: Path) -> None:
     seen: dict[str, Any] = {}
     folder = tmp_path.resolve() / "faces"

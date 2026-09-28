@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import socket
 import uuid
 from contextlib import contextmanager
@@ -289,10 +290,11 @@ class Client:
                     and Path(path).is_absolute()
                     and not path.endswith(("/", "\\"))
                     and Path(path).suffix
+                    and Path(path).name == Path(path).name.rstrip(" .")
                     and not {".", ".."}.intersection(path.replace("\\", "/").split("/"))
                     for path in paths
                 )
-                and len(set(paths)) == expected_count
+                and len({os.path.normcase(os.path.normpath(path)) for path in paths}) == expected_count
             )
             if (
                 not isinstance(receipt, Mapping)
