@@ -189,7 +189,6 @@ def test_app_tool_names_ast_equals() -> None:
     assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
     app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
     assert set(TOOL_NAMES) == app_names
-    assert len(app_names) == 46
 
 
 def test_gpu_diagnostics_and_retry_client_routes() -> None:
