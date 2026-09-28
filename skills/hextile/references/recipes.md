@@ -85,3 +85,34 @@ get_sequence   # poll while queued or processing
 ```
 
 `create_sequence.config` is a full `HextileConfig` cloned from `upres-still`. Stop and report `paused` and `incomplete` (`incomplete` is resumable in the app; v1 has no resume MCP tool). Terminal: `completed`, `completed_with_errors`, `failed`, `cancelled`. Cancel with `stop_sequence`. Use `list_sequences` if the id is lost.
+
+## Recipe G — Generate Layer into an exact saved render
+
+No viewer is required. Ask for approval for each mutating call. Find the exact saved render in `list_runs`; its `head` is the parent for `get_layer_draft`. Here `r-123` and the 12-hex HEAD are samples. Use the actual IDs returned by each call.
+
+```text
+list_runs                         # choose exact render_id and its head
+get_layer_draft(render_id="r-123", parent_id="aaaaaaaaaaaa")
+# Require head == parent_id, studio_owned == false. If a draft exists, carry its
+# exact draft_id and mutation_rev; otherwise omit both for pointer-first creation.
+generate_layer(target="saved", render_id="r-123",
+  request_id="11111111111111111111111111111111",
+  expected_head="aaaaaaaaaaaa", parent_id="aaaaaaaaaaaa", mode="generate",
+  controls={"pipeline":"sdxl","prompt":{"global":"a red enamel pin","negative":""},
+    "diffusion":{"model":"sdxl-base","quantization":"none","seed":1,
+      "scheduler":"euler","guidance_scale":7.5,"num_inference_steps":20},
+    "output":{"width":1024,"height":1024},"alpha":{"mode":"opaque"},
+    "layer_gen":{"scene":{"enabled":false}}})
+get_layer_generation(render_id="r-123", job_id="11111111111111111111111111111111")
+# Poll until ready. Keep the returned draft_id and composition_id.
+land_generated_layer(target="saved", render_id="r-123", layer_id="pl_enamel1",
+  job_id="11111111111111111111111111111111", expected_head="aaaaaaaaaaaa",
+  draft_id=<returned draft_id>, composition_id=<returned composition_id>,
+  expected_mutation_rev=1,
+  pose={"yaw":20,"pitch":-10,"roll":0,"fov":40,"projection":"auto"})
+commit_layer_draft(target="saved", render_id="r-123", parent_id="aaaaaaaaaaaa",
+  draft_id=<same draft_id>, composition_id=<same composition_id>,
+  expected_mutation_rev=<land receipt mutation_rev>)
+```
+
+`ready` does not insert a layer. Land does not commit. If any acknowledgement is lost, reconcile the exact request/job/layer/draft IDs with `get_layer_generation` and `get_layer_draft`; inspect graph HEAD for an uncertain commit. Never send a fresh request or layer ID as an automatic retry. A missing RAM job after restart remains unknown. A rematte reply loss is non-replayable because APP chooses its new job ID; inspect local job activity before asking for another approved action. Max 64 layers per draft and eight takes per Re-gen layer. External `target=live` is forbidden.

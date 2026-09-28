@@ -19,11 +19,11 @@ Do not teach `hextile@360-hextile`.
 
 ## Complementarity card
 
-- MCP **renders**, monitors, cancels, seeds, saves shelf Workflows.
+- MCP **renders**, monitors, cancels, seeds, saves shelf Workflows, and can Generate Layer into an exact saved render.
 - Copilot **edits the open file**, navigates, operates armed Layers.
-- Neither creates / commits / arms Layers.
-- Copilot cannot start a render. Copilot never queues GPU.
-- MCP cannot `goto` or operate Layers.
+- Neither silently arms Layers or commits a generated layer; Generate, land, and commit are separate approved actions.
+- Copilot cannot start a Render run. Approved live Generate Layer may start one Layers GPU job.
+- MCP cannot `goto` or operate the open Layers canvas; saved Generate Layer is a narrow exception.
 - Live apply from MCP requires follow ON (`hextile_mcp_follow`).
 - Gate A (`hextile_copilot_gate_a_passed`) stays locked. Follow is not Auto.
 
@@ -40,10 +40,10 @@ REFUSE_NAV_MCP
   I can't open screens. Use Copilot or click the viewer.
 
 REFUSE_LAYERS_MCP
-  I can't operate Layers. Use Copilot in the studio, or the viewer.
+  I can't operate the open Layers canvas. Use Copilot in the studio or the viewer; for an exact saved render, use the Generate Layer tools.
 
 REFUSE_LAYERS_CREATE
-  I can't create, commit, or arm Layers.
+  I can't arm Layers or make arbitrary Layers edits. Generate, land, and commit need their explicit saved-render or approved live actions.
 
 REFUSE_STALE_GENERATION
   The open file changed. Call get_live_context again and retry.
@@ -63,7 +63,7 @@ REFUSE_IDENTITY
 ## Live kernel (v1)
 
 - One writer: `copilotApply.applyConfigDelta`.
-- One queue door: `POST /api/workflows/run` (human RENDER or MCP `run_workflow`). Copilot has neither.
+- One Render-run queue door: `POST /api/workflows/run` (human RENDER or MCP `run_workflow`). Copilot has no Render-run path; approved Generate Layer uses the separate existing Layers job owner.
 - FE RAM studio slot (preview-slot). `doc_generation` is the FNV-1a hex **string** of the identity-stripped live export.
 - Apply-live body `{config_partial, doc_generation, explanation}`. Ticket; FE merge-then-apply.
 - Empty or expired slot → 403 `studio_not_present`. Slot TTL 30s. FE heartbeat 10s. `pagehide` DELETE. Ticket TTL same clock. Follow OFF or empty republish drops leftover tickets. `startFollow` consumes leftover tickets before poll; busy follow does not consume.

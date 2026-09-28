@@ -97,6 +97,13 @@ TOOL_NAMES = (
     "export_to_unreal_project",
     "preflight_file_export",
     "export_render_file",
+    "get_layer_draft",
+    "generate_layer",
+    "get_layer_generation",
+    "cancel_layer_generation",
+    "rematte_layer",
+    "land_generated_layer",
+    "commit_layer_draft",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -131,6 +138,8 @@ _READ_ONLY = frozenset(
         "get_unreal_export_catalog",
         "preflight_unreal_export",
         "preflight_file_export",
+        "get_layer_draft",
+        "get_layer_generation",
     }
 )
 _MUTATING = frozenset(
@@ -160,6 +169,11 @@ _MUTATING = frozenset(
         "import_batch_outputs",
         "export_to_unreal_project",
         "export_render_file",
+        "generate_layer",
+        "cancel_layer_generation",
+        "rematte_layer",
+        "land_generated_layer",
+        "commit_layer_draft",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -185,6 +199,7 @@ _DESTRUCTIVE = frozenset(
         "stop_sequence",
         "cancel_batch",
         "cancel_model_download",
+        "cancel_layer_generation",
     }
 )
 _CONTROL_TOOLS = frozenset(
@@ -200,8 +215,14 @@ _CONTROL_TOOLS = frozenset(
         "stop_sequence",
         "cancel_batch",
         "cancel_model_download",
+        "get_layer_generation",
+        "cancel_layer_generation",
     }
 )
+_LAYER_TOOLS = frozenset({
+    "get_layer_draft", "generate_layer", "get_layer_generation", "cancel_layer_generation",
+    "rematte_layer", "land_generated_layer", "commit_layer_draft",
+})
 _PRIVATE_ARGUMENT_KEYS = frozenset(
     {
         "actor",
@@ -309,6 +330,78 @@ _FILE_EXPORT_PROPERTIES: dict[str, Any] = {
     "jpeg_quality": {"type": "integer", "minimum": 1, "maximum": 100},
     "include_360_metadata": {"type": "boolean"},
 }
+
+
+def _layer_object(properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[str, Any]:
+    schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
+    if required:
+        schema["required"] = list(required)
+    return schema
+
+
+_LAYER_ID = {"type": "string", "pattern": "^[0-9a-f]{12}([0-9a-f]{20})?$"}
+_LAYER_JOB_ID = {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+_LAYER_TARGET = {"type": "string", "enum": ["saved", "live"]}
+_LAYER_ALPHA = _layer_object({"mode": {"type": "string", "enum": ["auto-cutout", "opaque"]}}, ("mode",))
+_LAYER_SCENE = _layer_object({
+    "enabled": {"type": "boolean"}, "strength": {"type": "number", "minimum": 0.3, "maximum": 1},
+    "yaw": {"type": "number", "minimum": -180, "maximum": 180},
+    "pitch": {"type": "number", "minimum": -90, "maximum": 90},
+    "fov": {"type": "number", "minimum": 20, "maximum": 90},
+}, ("enabled",))
+_LAYER_PROMPT = _layer_object({
+    "global": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "negative": {"type": "string", "maxLength": 2000},
+}, ("global",))
+_LAYER_OUTPUT = _layer_object({
+    "width": {"type": "integer", "enum": [1024, 1152, 896]},
+    "height": {"type": "integer", "enum": [1024, 1152, 896]},
+}, ("width", "height"))
+_LAYER_DIFFUSION = _layer_object({
+    "model": {"type": "string", "minLength": 1, "maxLength": 256},
+    "quantization": {"type": "string", "minLength": 1, "maxLength": 64},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "scheduler": {"type": "string", "minLength": 1, "maxLength": 64},
+    "guidance_scale": {"type": "number", "minimum": 0, "maximum": 100},
+    "num_inference_steps": {"type": "integer", "minimum": 1, "maximum": 500},
+    "lora": _layer_object({
+        "enabled": {"type": "boolean"},
+        "models": {"type": "array", "maxItems": 32, "items": _layer_object({
+            "model_path": {"type": "string", "minLength": 1, "maxLength": 512},
+            "strength": {"type": "number"}, "enabled": {"type": "boolean"},
+        }, ("model_path", "strength", "enabled"))},
+        "settings": _layer_object({"combine_mode": {"type": "string", "enum": ["additive", "normalized"]}}, ("combine_mode",)),
+    }),
+}, ("model", "quantization", "scheduler", "guidance_scale", "num_inference_steps"))
+_LAYER_GEN_SETTINGS = _layer_object({
+    "scene": _LAYER_SCENE, "include_global": {"type": "boolean"},
+    "include_style": {"type": "boolean"}, "include_directional": {"type": "boolean"},
+    "include_semantic": {"type": "boolean"}, "modularity": {"type": "boolean"},
+}, ("scene",))
+_LAYER_CONTROLS = _layer_object({
+    "pipeline": {"type": "string", "minLength": 1, "maxLength": 64},
+    "prompt": _LAYER_PROMPT, "diffusion": _LAYER_DIFFUSION, "output": _LAYER_OUTPUT,
+    "alpha": _LAYER_ALPHA, "layer_gen": _LAYER_GEN_SETTINGS,
+}, ("pipeline", "prompt", "diffusion", "output", "alpha", "layer_gen"))
+_LAYER_EDITS = _layer_object({
+    "pipeline": {"type": "string", "minLength": 1, "maxLength": 64},
+    "prompt": _LAYER_PROMPT, "diffusion": _LAYER_DIFFUSION,
+    "output": _LAYER_OUTPUT, "alpha": _LAYER_ALPHA,
+    "layer_gen": _LAYER_GEN_SETTINGS,
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+})
+_LAYER_POSE = _layer_object({
+    "yaw": {"type": "number", "minimum": -180, "maximum": 180},
+    "pitch": {"type": "number", "minimum": -90, "maximum": 90},
+    "roll": {"type": "number", "minimum": -180, "maximum": 180},
+    "fov": {"type": "number", "minimum": 5, "maximum": 360},
+    "projection": {"type": "string", "enum": ["auto"]},
+}, ("yaw", "pitch", "roll", "fov"))
+_LAYER_RECOVERY_TARGET = _layer_object({
+    "layer_id": {"type": "string", "maxLength": 64},
+    "asset": {"type": "string"}, "recipeSource": {"type": "string"},
+    "takes_fingerprint": {"type": "string", "maxLength": 4096},
+}, ("layer_id", "asset", "recipeSource", "takes_fingerprint"))
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -1238,11 +1331,84 @@ TOOLS: list[dict[str, Any]] = [
         },
         required=[*_FILE_EXPORT_REQUIRED, "source_revision", "output_fingerprint"],
     ),
+    _tool_def(
+        "get_layer_draft",
+        "Inspect the exact saved render HEAD and v6 Layers draft before any generation or land. "
+        "Returns bounded active layer ids, bare source-pair leaves and take fingerprints; no viewer needed.",
+        {"render_id": {"type": "string"}, "parent_id": _LAYER_ID},
+        required=["render_id", "parent_id"],
+    ),
+    _tool_def(
+        "generate_layer",
+        "Start one Generate Layer job. Saved target requires a stable 32-hex request_id and exact "
+        "HEAD/draft/revision; generate uses controls, regen/variation use the witnessed source pair. "
+        "This does not land or commit. Live target is approved internal Copilot only; external MCP gets 403.",
+        {
+            "target": _LAYER_TARGET, "render_id": {"type": "string"},
+            "request_id": _LAYER_JOB_ID, "expected_head": _LAYER_ID, "parent_id": _LAYER_ID,
+            "expected_draft_id": _LAYER_ID, "expected_mutation_rev": {"type": "integer", "minimum": 1},
+            "mode": {"type": "string", "enum": ["generate", "regen", "variation"]},
+            "controls": _LAYER_CONTROLS,
+            "source_layer_id": {"type": "string", "maxLength": 64},
+            "source_asset": {"type": "string", "pattern": "^[^/\\\\]+\\.png$"},
+            "recipeSource": {"type": "string", "pattern": "^[0-9a-f]{32}\\.hextile\\.json$"},
+            "edits": _LAYER_EDITS, "takes_fingerprint": {"type": "string", "maxLength": 4096},
+            "scene_source": _layer_object({
+                "node_id": _LAYER_ID, "revision": {"type": "string", "maxLength": 128},
+            }, ("node_id", "revision")),
+        },
+        required=["target", "render_id", "expected_head", "parent_id", "mode"],
+    ),
+    _tool_def(
+        "get_layer_generation",
+        "Read one exact Generate Layer job by id until terminal. Ready means an artifact exists, not a landed layer.",
+        {"render_id": {"type": "string"}, "job_id": _LAYER_JOB_ID},
+        required=["render_id", "job_id"],
+    ),
+    _tool_def(
+        "cancel_layer_generation",
+        "Request cancellation of one exact Generate Layer job. The acknowledgement is not GPU release; "
+        "read get_layer_generation until terminal and released.",
+        {"render_id": {"type": "string"}, "job_id": _LAYER_JOB_ID},
+        required=["render_id", "job_id"],
+    ),
+    _tool_def(
+        "rematte_layer",
+        "Re-matte an exact retained RGB token, or Keep rectangle with alpha.mode=opaque. "
+        "One call only: the server mints the new job id, so transport loss is unknown and non-replayable.",
+        {"render_id": {"type": "string"}, "job_id": _LAYER_JOB_ID,
+         "rgb_draft": {"type": "string", "minLength": 8, "maxLength": 200},
+         "alpha": _LAYER_ALPHA, "target": _LAYER_RECOVERY_TARGET},
+        required=["render_id", "job_id", "rgb_draft", "alpha"],
+    ),
+    _tool_def(
+        "land_generated_layer",
+        "Land one ready job pair into an exact v6 draft; no commit. New insertion needs a stable "
+        "client layer_id, regen uses its witnessed source layer id. Saved target requires exact HEAD/draft/revision. "
+        "Live target is approved internal Copilot only; external MCP gets 403.",
+        {"target": _LAYER_TARGET, "render_id": {"type": "string"},
+         "layer_id": {"type": "string", "pattern": "^pl_[A-Za-z0-9_-]{3,}$", "maxLength": 64},
+         "job_id": _LAYER_JOB_ID, "expected_head": _LAYER_ID, "draft_id": _LAYER_ID,
+         "composition_id": {"type": "string", "pattern": "^comp_[0-9a-f]{12}$"},
+         "expected_mutation_rev": {"type": "integer", "minimum": 1},
+         "pose": _LAYER_POSE, "source_layer_id": {"type": "string", "maxLength": 64}},
+        required=["target", "render_id", "layer_id", "job_id", "expected_head", "draft_id",
+                  "composition_id", "expected_mutation_rev", "pose"],
+    ),
+    _tool_def(
+        "commit_layer_draft",
+        "Explicitly bake the exact saved v6 draft onto current HEAD as a final op:layers node. "
+        "No force or implicit retarget. Live target is approved internal Copilot only; external MCP gets 403.",
+        {"target": _LAYER_TARGET, "render_id": {"type": "string"},
+         "parent_id": _LAYER_ID, "draft_id": _LAYER_ID,
+         "composition_id": {"type": "string", "pattern": "^comp_[0-9a-f]{12}$"},
+         "expected_mutation_rev": {"type": "integer", "minimum": 1}},
+        required=["target", "render_id", "parent_id", "draft_id", "composition_id", "expected_mutation_rev"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 54
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1322,6 +1488,58 @@ def _seed_activity(name: str, args: Mapping[str, Any], payload: Any = None) -> O
     return seed
 
 
+def _layer_receipt(name: str, data: Any) -> dict[str, Any]:
+    """Project APP's private generation payload into bounded MCP facts."""
+    if not isinstance(data, Mapping):
+        raise HextileClientError("Invalid Layers response from APP", kind="other")
+    if name == "get_layer_draft":
+        result = {key: data[key] for key in (
+            "head", "parent_id", "draft_id", "composition_id", "mutation_rev", "studio_owned"
+        ) if key in data}
+        result["active_bag_layers"] = [
+            {key: layer[key] for key in ("layer_id", "asset", "recipeSource", "takes_fingerprint") if key in layer}
+            for layer in data.get("active_bag_layers", []) if isinstance(layer, Mapping)
+        ]
+        return result
+    if name in {"get_layer_generation", "cancel_layer_generation", "rematte_layer"}:
+        result = {key: data[key] for key in (
+            "job_id", "mode", "state", "render_id", "parent_id", "package_id", "composition_id",
+            "width", "height", "seed", "warnings", "released",
+        ) if key in data}
+        alpha = data.get("alpha")
+        if isinstance(alpha, Mapping):
+            result["alpha"] = {key: alpha[key] for key in ("mode", "method", "model_id", "revision") if key in alpha}
+        draft = data.get("rgb_draft")
+        if isinstance(draft, Mapping):
+            result["rgb_draft"] = {key: draft[key] for key in ("token", "expires_at") if key in draft}
+        error = data.get("error")
+        if isinstance(error, Mapping) and "code" in error:
+            result["error"] = {"code": error["code"]}
+        return result
+    keys = {
+        "generate_layer": ("job_id", "draft_id", "composition_id", "head", "state"),
+        "land_generated_layer": ("draft_id", "composition_id", "mutation_rev", "layer_id", "already_landed"),
+        "commit_layer_draft": ("node_id", "head", "width", "height"),
+    }[name]
+    return {key: data[key] for key in keys if key in data}
+
+
+def _layer_error_payload(exc: HextileClientError) -> dict[str, Any]:
+    if exc.kind == "layer_outcome_unknown":
+        return error_payload(exc)
+    code = None
+    if exc.body:
+        try:
+            detail = json.loads(exc.body).get("detail")
+            if isinstance(detail, Mapping) and isinstance(detail.get("code"), str):
+                code = detail["code"]
+        except (ValueError, AttributeError):
+            pass
+    return {"ok": False, "error": "Layer operation refused or unavailable",
+            "kind": exc.kind, "status_code": exc.status_code,
+            "code": code or ("app_down" if exc.kind == "app_down" else "layer_refused")}
+
+
 def _ok_result(data: Any) -> dict[str, Any]:
     text = data if isinstance(data, str) else json.dumps(data, indent=2, default=str)
     return {"content": [{"type": "text", "text": text}], "isError": False}
@@ -1399,6 +1617,13 @@ class HextileMcpServer:
             "export_to_unreal_project": self._export_to_unreal_project,
             "preflight_file_export": self._preflight_file_export,
             "export_render_file": self._export_render_file,
+            "get_layer_draft": self._get_layer_draft,
+            "generate_layer": self._generate_layer,
+            "get_layer_generation": self._get_layer_generation,
+            "cancel_layer_generation": self._cancel_layer_generation,
+            "rematte_layer": self._rematte_layer,
+            "land_generated_layer": self._land_generated_layer,
+            "commit_layer_draft": self._commit_layer_draft,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -1536,7 +1761,7 @@ class HextileMcpServer:
                 else "succeeded"
             )
             # Batch and seed IDs must never enter run.run_id (Render consumers).
-            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") else _run_from_payload(data)
+            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") or name in _LAYER_TOOLS else _run_from_payload(data)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
@@ -1547,6 +1772,7 @@ class HextileMcpServer:
             )
             return _ok_result(data)
         except HextileClientError as exc:
+            safe_error = _layer_error_payload(exc) if name in _LAYER_TOOLS else error_payload(exc)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
@@ -1554,13 +1780,21 @@ class HextileMcpServer:
                 error={
                     "kind": exc.kind,
                     "status_code": exc.status_code,
-                    "message": str(exc),
+                    "message": safe_error["error"] if name in _LAYER_TOOLS else str(exc),
                 },
                 seed=_seed_activity(name, args),
                 overrides_keys=overrides_keys,
             )
-            return _err_result(error_payload(exc))
+            return _err_result(safe_error)
         except Exception as exc:  # noqa: BLE001
+            if name in _LAYER_TOOLS:
+                self._emit_activity(
+                    tool=name, call_id=call_id, phase="failed",
+                    error={"kind": "other", "status_code": None, "message": "Layer operation failed"},
+                    overrides_keys=overrides_keys,
+                )
+                return _err_result({"ok": False, "error": "Layer operation failed",
+                                    "kind": "other", "code": "internal_error"})
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
@@ -1788,6 +2022,90 @@ class HextileMcpServer:
         return self.client.export_render_file(
             args["render_id"], self._file_export_body(args, export=True)
         )
+
+    def _layer_saved_or_live(self, name: str, args: dict[str, Any], keys: frozenset[str]) -> Any:
+        target = args.get("target")
+        if target not in {"saved", "live"}:
+            raise HextileClientError("target must be saved or live", kind="other")
+        unexpected = set(args) - keys - {"target", "render_id"}
+        if unexpected:
+            raise HextileClientError(f"Unsupported {name} argument: {sorted(unexpected)[0]}", kind="other")
+        if target == "live":
+            if not self.internal_mode:
+                raise HextileClientError("Live Layers target requires an approved internal Copilot turn.",
+                                         status_code=403, kind="http")
+            return self.client.creative_live(name, args)
+        body = {key: args[key] for key in keys if key in args}
+        render_id = str(args["render_id"])
+        if name == "generate_layer":
+            if not isinstance(body.get("request_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", body["request_id"]):
+                raise HextileClientError("saved Generate Layer needs a stable 32-hex request_id", kind="other")
+            return _layer_receipt(name, self.client.generate_layer(render_id, body))
+        if name == "land_generated_layer":
+            return _layer_receipt(name, self.client.land_generated_layer(render_id, body))
+        state = self.client.get_layer_draft(render_id, str(body["parent_id"]))
+        if (not isinstance(state, Mapping) or state.get("studio_owned")
+                or state.get("head") != body["parent_id"]
+                or state.get("draft_id") != body["draft_id"]
+                or state.get("composition_id") != body["composition_id"]
+                or state.get("mutation_rev") != body["expected_mutation_rev"]):
+            raise HextileClientError("Saved Layers commit witness changed or belongs to the open studio.",
+                                     status_code=409, kind="http")
+        return _layer_receipt(name, self.client.commit_layer_draft(render_id, body))
+
+    def _get_layer_draft(self, args: dict[str, Any]) -> Any:
+        return _layer_receipt("get_layer_draft", self.client.get_layer_draft(
+            str(args["render_id"]), str(args["parent_id"])
+        ))
+
+    def _generate_layer(self, args: dict[str, Any]) -> Any:
+        return self._layer_saved_or_live("generate_layer", args, frozenset({
+            "request_id", "expected_head", "parent_id", "expected_draft_id", "expected_mutation_rev",
+            "mode", "controls", "source_layer_id", "source_asset", "recipeSource", "edits",
+            "takes_fingerprint", "scene_source",
+        }))
+
+    def _get_layer_generation(self, args: dict[str, Any]) -> Any:
+        return _layer_receipt("get_layer_generation", self.client.get_layer_generation(
+            str(args["render_id"]), str(args["job_id"])
+        ))
+
+    def _saved_layer_job(self, args: dict[str, Any]) -> None:
+        job = self.client.get_layer_generation(str(args["render_id"]), str(args["job_id"]))
+        if not isinstance(job, Mapping):
+            raise HextileClientError("Layer job is unavailable", status_code=409, kind="http")
+        state = self.client.get_layer_draft(str(args["render_id"]), str(job.get("parent_id") or ""))
+        if (not isinstance(state, Mapping) or state.get("studio_owned")
+                or state.get("draft_id") != job.get("package_id")
+                or state.get("composition_id") != job.get("composition_id")):
+            raise HextileClientError("Layer job is not owned by the exact saved draft.",
+                                     status_code=409, kind="http")
+
+    def _cancel_layer_generation(self, args: dict[str, Any]) -> Any:
+        self._saved_layer_job(args)
+        return _layer_receipt("cancel_layer_generation", self.client.cancel_layer_generation(
+            str(args["render_id"]), str(args["job_id"])
+        ))
+
+    def _rematte_layer(self, args: dict[str, Any]) -> Any:
+        self._saved_layer_job(args)
+        body = {"version": 1, "rgb_draft": args["rgb_draft"], "alpha": args["alpha"]}
+        if "target" in args:
+            body["target"] = args["target"]
+        return _layer_receipt("rematte_layer", self.client.rematte_layer(
+            str(args["render_id"]), str(args["job_id"]), body
+        ))
+
+    def _land_generated_layer(self, args: dict[str, Any]) -> Any:
+        return self._layer_saved_or_live("land_generated_layer", args, frozenset({
+            "layer_id", "job_id", "expected_head", "draft_id", "composition_id",
+            "expected_mutation_rev", "pose", "source_layer_id",
+        }))
+
+    def _commit_layer_draft(self, args: dict[str, Any]) -> Any:
+        return self._layer_saved_or_live("commit_layer_draft", args, frozenset({
+            "parent_id", "draft_id", "composition_id", "expected_mutation_rev",
+        }))
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

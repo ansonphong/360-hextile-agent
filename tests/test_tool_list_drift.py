@@ -110,13 +110,19 @@ EXPECTED_TOOLS = (
     "export_to_unreal_project",
     "preflight_file_export",
     "export_render_file",
+    "get_layer_draft",
+    "generate_layer",
+    "get_layer_generation",
+    "cancel_layer_generation",
+    "rematte_layer",
+    "land_generated_layer",
+    "commit_layer_draft",
 )
 
 
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 54
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11

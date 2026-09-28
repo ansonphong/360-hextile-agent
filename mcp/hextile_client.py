@@ -45,6 +45,12 @@ _REQUEST_HEADERS: ContextVar[Mapping[str, str]] = ContextVar(
 )
 
 
+def _layer_transport_unknown(exc: BaseException) -> bool:
+    return isinstance(exc, http.client.HTTPException) or (
+        isinstance(exc, HextileClientError) and exc.kind == "app_down"
+    )
+
+
 class HextileClientError(RuntimeError):
     """HTTP or transport failure talking to the local backend."""
 
@@ -55,11 +61,13 @@ class HextileClientError(RuntimeError):
         status_code: Optional[int] = None,
         body: Optional[str] = None,
         kind: str = "http",
+        receipt: Optional[Mapping[str, Any]] = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.body = body
         self.kind = kind  # app_down | upgrade | http | other
+        self.receipt = dict(receipt) if receipt is not None else None
 
 
 class Client:
@@ -303,6 +311,130 @@ class Client:
                     kind="ue_outcome_unknown",
                 ) from exc
             raise
+
+    # ── saved Layers generation ─────────────────────────────────────────
+
+    def get_layer_draft(self, render_id: str, parent_id: str) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        return self.get_json(f"/api/renders/{rid}/layers/agent-state", params={"parent_id": parent_id})
+
+    def generate_layer(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        try:
+            return self.post_json(f"/api/renders/{rid}/layers/agent-generate", body)
+        except (HextileClientError, http.client.HTTPException) as exc:
+            if not _layer_transport_unknown(exc):
+                raise
+            try:
+                observed = self.get_layer_generation(render_id, str(body["request_id"]))
+                if (isinstance(observed, Mapping) and observed.get("job_id") == body["request_id"]
+                        and observed.get("parent_id") == body.get("parent_id")):
+                    return {"job_id": observed["job_id"], "draft_id": observed.get("package_id"),
+                            "composition_id": observed.get("composition_id"), "head": observed["parent_id"],
+                            "state": observed.get("state", "unknown")}
+            except (HextileClientError, http.client.HTTPException):
+                pass
+            raise HextileClientError(
+                "Generation submission outcome unknown. Read get_layer_generation with the same request_id; "
+                "a missing RAM job after restart is not permission to submit a new id.",
+                kind="layer_outcome_unknown",
+                receipt={"state": "unknown", "render_id": render_id, "request_id": body["request_id"],
+                         "reconcile": "get_layer_generation"},
+            ) from exc
+
+    def get_layer_generation(self, render_id: str, job_id: str) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        jid = urllib.parse.quote(job_id, safe="")
+        return self.get_json(f"/api/renders/{rid}/layers/generate/{jid}")
+
+    def cancel_layer_generation(self, render_id: str, job_id: str) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        jid = urllib.parse.quote(job_id, safe="")
+        return self.post_json(f"/api/renders/{rid}/layers/generate/{jid}/agent-cancel")
+
+    def rematte_layer(self, render_id: str, job_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        jid = urllib.parse.quote(job_id, safe="")
+        try:
+            return self.post_json(f"/api/renders/{rid}/layers/generate/{jid}/agent-rematte", body)
+        except (HextileClientError, http.client.HTTPException) as exc:
+            if not _layer_transport_unknown(exc):
+                raise
+            raise HextileClientError(
+                "Re-matte outcome unknown and non-replayable: the server chooses its job id. "
+                "Inspect local job activity before requesting a newly approved action.",
+                kind="layer_outcome_unknown",
+                receipt={"state": "unknown", "non_replayable": True, "render_id": render_id,
+                         "parent_job_id": job_id, "rgb_draft": body.get("rgb_draft")},
+            ) from exc
+
+    def land_generated_layer(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        try:
+            return self.post_json(f"/api/renders/{rid}/layers/agent-land", body)
+        except (HextileClientError, http.client.HTTPException) as exc:
+            if not _layer_transport_unknown(exc):
+                raise
+            try:
+                job = self.get_layer_generation(render_id, str(body["job_id"]))
+                draft = self.get_layer_draft(render_id, str(body["expected_head"]))
+                if (isinstance(job, Mapping) and job.get("state") == "ready"
+                        and job.get("parent_id") == body["expected_head"]
+                        and job.get("package_id") == body["draft_id"]
+                        and job.get("composition_id") == body["composition_id"]
+                        and isinstance(draft, Mapping) and draft.get("head") == body["expected_head"]
+                        and draft.get("draft_id") == body["draft_id"]
+                        and draft.get("composition_id") == body["composition_id"]):
+                    for layer in draft.get("active_bag_layers", []):
+                        if (isinstance(layer, Mapping) and layer.get("layer_id") == body["layer_id"]
+                                and layer.get("asset") == job.get("asset")
+                                and layer.get("recipeSource") == job.get("recipeSource")):
+                            return {"draft_id": body["draft_id"], "composition_id": body["composition_id"],
+                                    "mutation_rev": draft.get("mutation_rev"), "layer_id": body["layer_id"],
+                                    "already_landed": True}
+            except (HextileClientError, http.client.HTTPException):
+                pass
+            raise HextileClientError(
+                "Layer landing outcome unknown. Inspect the exact saved draft and job before any repeat; "
+                "never mint a new layer id to retry.",
+                kind="layer_outcome_unknown",
+                receipt={"state": "unknown", "render_id": render_id, "job_id": body["job_id"],
+                         "layer_id": body["layer_id"], "draft_id": body["draft_id"],
+                         "reconcile": "get_layer_draft and get_layer_generation"},
+            ) from exc
+
+    def commit_layer_draft(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        try:
+            return self.post_json(f"/api/renders/{rid}/layers/agent-commit", body, timeout=LONG_OPERATION_TIMEOUT_S)
+        except (HextileClientError, http.client.HTTPException) as exc:
+            if not _layer_transport_unknown(exc):
+                raise
+            try:
+                rid = urllib.parse.quote(render_id, safe="")
+                graph = self.get_json(f"/api/renders/{rid}/graph")
+                if isinstance(graph, Mapping) and graph.get("head") == body["draft_id"]:
+                    for node in graph.get("nodes", []):
+                        if (isinstance(node, Mapping) and node.get("id") == body["draft_id"]
+                                and node.get("op") == "layers" and node.get("parent") == body["parent_id"]):
+                            return {"node_id": body["draft_id"], "head": body["draft_id"]}
+            except (HextileClientError, http.client.HTTPException):
+                pass
+            raise HextileClientError(
+                "Layer commit outcome unknown. Inspect the exact draft id in the render graph "
+                "and HEAD before considering a new approval; do not replay blindly.",
+                kind="layer_outcome_unknown",
+                receipt={"state": "unknown", "render_id": render_id,
+                         "draft_id": body["draft_id"], "parent_id": body["parent_id"],
+                         "reconcile": "inspect render graph HEAD and draft node"},
+            ) from exc
+
+    def creative_live(self, tool_name: str, arguments: Mapping[str, Any]) -> Any:
+        headers = _REQUEST_HEADERS.get()
+        if not self.internal_mode or not headers.get("X-Hextile-Copilot-Token") or not headers.get("X-Hextile-Op"):
+            raise HextileClientError("Live Layers actions require an approved internal Copilot turn.",
+                                     status_code=403, kind="http")
+        return self.post_json("/api/agent/creative-live", {"tool_name": tool_name, "arguments": dict(arguments)})
 
     def apply_config_delta(
         self,
@@ -974,5 +1106,7 @@ def error_payload(exc: BaseException) -> dict[str, Any]:
         }
         if exc.kind == "capability":
             payload["code"] = "batch_unavailable"
+        if exc.receipt is not None:
+            payload["receipt"] = exc.receipt
         return payload
     return {"ok": False, "error": str(exc), "kind": "other"}
