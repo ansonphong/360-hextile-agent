@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import io
+import re
 import sys
 import urllib.error
 from pathlib import Path
@@ -12,10 +13,12 @@ from typing import Any
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mcp"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "360-HEXTILE-APP"))
 from hextile_client import Client  # noqa: E402
 from hextile_mcp import HextileMcpServer, TOOLS  # noqa: E402
 
 JOB = "1" * 32
+SAVED_SESSION = "agent-" + JOB
 HEAD = "a" * 12
 DRAFT = "b" * 12
 BAG = "comp_" + "c" * 12
@@ -62,6 +65,19 @@ def test_seven_closed_tools_and_policy() -> None:
         assert schema["properties"]["execution_target"]["enum"] == ["saved", "live"]
         assert "execution_target" not in schema["required"]
     assert "target" in catalog["rematte_layer"]["inputSchema"]["properties"]
+    assert "rgb_draft" not in catalog["rematte_layer"]["inputSchema"]["required"]
+
+
+def test_generate_source_asset_regex_keeps_basename_gate_and_full_copilot_catalog() -> None:
+    pattern = next(tool for tool in TOOLS if tool["name"] == "generate_layer")["inputSchema"]["properties"]["source_asset"]["pattern"]
+    assert "/" not in pattern
+    assert re.fullmatch(pattern, "ready.png")
+    for value in ("../ready.png", "dir/ready.png", r"dir\ready.png", "ready.jpg"):
+        assert re.fullmatch(pattern, value) is None
+
+    from backend.services.copilot.tool_contract import model_catalog, validate_model_envelope
+
+    validate_model_envelope(model_catalog(TOOLS))
 
 
 @pytest.mark.parametrize("name", ["generate_layer", "land_generated_layer", "commit_layer_draft"])
@@ -124,6 +140,63 @@ def test_saved_lifecycle_uses_named_routes_and_strips_private_payload() -> None:
     assert start_body["request_id"] == JOB and "target" not in start_body
 
 
+@pytest.mark.parametrize("name", ["get_layer_generation", "cancel_layer_generation", "rematte_layer"])
+def test_internal_job_receipts_never_expose_rgb_token(name: str) -> None:
+    def opener(req: Any, timeout: Any = None) -> Response:
+        if req.full_url.endswith("/generate/" + JOB):
+            return Response({"job_id": JOB, "render_id": "r1", "parent_id": HEAD,
+                             "package_id": DRAFT, "composition_id": BAG, "session_id": SAVED_SESSION,
+                             "state": "ready",
+                             "rgb_draft": {"token": "rgb-token", "expires_at": 1234567890}})
+        if req.full_url.endswith("/agent-state?parent_id=" + HEAD):
+            return Response({"head": HEAD, "draft_id": DRAFT, "composition_id": BAG,
+                             "studio_owned": False})
+        return Response({"job_id": JOB, "state": "ready",
+                         "rgb_draft": {"token": "rgb-token", "expires_at": 1234567890}})
+
+    server = HextileMcpServer(client=Client(opener=opener, internal_mode=True), child_token="test")
+    args = {"render_id": "r1", "job_id": JOB}
+    if name == "rematte_layer":
+        args["alpha"] = {"mode": "opaque"}
+    result = server.call_tool(name, args)
+    assert result["isError"] is False
+    assert "rgb-token" not in result["content"][0]["text"]
+    assert payload(result)["rgb_draft"] == {"available": True, "expires_at": 1234567890}
+    from backend.services.copilot.tool_contract import PathRefStore
+    assert PathRefStore().project(payload(result), result=True, tool_name=name) == payload(result)
+
+
+def test_external_rematte_requires_supplied_token_and_internal_rejects_one() -> None:
+    posts: list[dict[str, Any]] = []
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        if req.full_url.endswith("/generate/" + JOB):
+            return Response({"job_id": JOB, "parent_id": HEAD, "package_id": DRAFT,
+                             "composition_id": BAG, "session_id": SAVED_SESSION,
+                             "rgb_draft": {"token": "rgb-token"}})
+        if req.full_url.endswith("/agent-state?parent_id=" + HEAD):
+            return Response({"head": HEAD, "draft_id": DRAFT, "composition_id": BAG,
+                             "studio_owned": False})
+        if req.full_url.endswith("/agent-rematte"):
+            posts.append(json.loads(req.data))
+            return Response({"job_id": JOB, "state": "admitted"})
+        return Response({})
+
+    args = {"render_id": "r1", "job_id": JOB, "alpha": {"mode": "opaque"}}
+    external = HextileMcpServer(client=Client(opener=opener))
+    missing = external.call_tool("rematte_layer", args)
+    assert missing["isError"] is True and payload(missing)["status_code"] == 400
+    assert not posts
+    supplied = external.call_tool("rematte_layer", {**args, "rgb_draft": "rgb-token"})
+    assert supplied["isError"] is False
+    assert posts == [{"version": 1, "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}}]
+
+    internal = HextileMcpServer(client=Client(opener=opener, internal_mode=True), child_token="test")
+    rejected = internal.call_tool("rematte_layer", {**args, "rgb_draft": "rgb-token"})
+    assert rejected["isError"] is True and payload(rejected)["status_code"] == 400
+    assert len(posts) == 1
+
+
 def test_external_live_refused_without_http_and_private_live_wire() -> None:
     calls: list[Any] = []
 
@@ -152,7 +225,7 @@ def test_external_live_refused_without_http_and_private_live_wire() -> None:
 @pytest.mark.parametrize("name,args", [
     ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB, "execution_target": "live"}),
     ("rematte_layer", {"render_id": "r1", "job_id": JOB, "execution_target": "live",
-                       "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"},
+                       "alpha": {"mode": "opaque"},
                        "target": {"layer_id": "pl_enamel1", "asset": "take.png",
                                   "recipeSource": "take.hextile.json", "takes_fingerprint": "fp"}}),
 ])
@@ -189,7 +262,8 @@ def test_uncertain_rematte_is_one_call_and_non_replayable() -> None:
         attempts.append(req.full_url)
         if req.full_url.endswith("/generate/" + JOB):
             return Response({"job_id": JOB, "parent_id": HEAD, "package_id": DRAFT,
-                             "composition_id": BAG, "state": "failed"})
+                             "composition_id": BAG, "session_id": SAVED_SESSION, "state": "failed",
+                             "rgb_draft": {"token": "rgb-token"}})
         if req.full_url.endswith("/agent-state?parent_id=" + HEAD):
             return Response({"head": HEAD, "draft_id": DRAFT, "composition_id": BAG,
                              "studio_owned": False})
@@ -197,7 +271,7 @@ def test_uncertain_rematte_is_one_call_and_non_replayable() -> None:
 
     server = HextileMcpServer(client=Client(opener=unavailable, internal_mode=True), child_token="test")
     result = server.call_tool("rematte_layer", {"render_id": "r1", "job_id": JOB,
-                                                "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}})
+                                                "alpha": {"mode": "opaque"}})
     assert result["isError"] is True
     error = payload(result)
     assert error["kind"] == "layer_outcome_unknown"
@@ -215,7 +289,7 @@ def test_uncertain_live_rematte_is_one_call_and_non_replayable() -> None:
 
     server = HextileMcpServer(client=Client(opener=unavailable, internal_mode=True), child_token="test")
     result = server.call_tool("rematte_layer", {"execution_target": "live", "render_id": "r1",
-                                                "job_id": JOB, "rgb_draft": "rgb-token",
+                                                "job_id": JOB,
                                                 "alpha": {"mode": "opaque"}}, operation_id="approved-op")
     assert result["isError"] is True
     error = payload(result)
@@ -313,7 +387,7 @@ def test_lost_land_reply_checks_ready_pair_and_same_draft() -> None:
 @pytest.mark.parametrize("name,arguments", [
     ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB}),
     ("rematte_layer", {"render_id": "r1", "job_id": JOB,
-                       "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}}),
+                       "alpha": {"mode": "opaque"}}),
     ("commit_layer_draft", {"target": "saved", "render_id": "r1", "parent_id": HEAD,
                             "draft_id": DRAFT, "composition_id": BAG, "expected_mutation_rev": 2}),
 ])
@@ -323,7 +397,8 @@ def test_studio_owned_saved_job_refuses_before_mutating_post(name: str, argument
     def opener(req: Any, timeout: Any = None) -> Response:
         calls.append((req.get_method(), req.full_url))
         if req.full_url.endswith("/generate/" + JOB):
-            return Response({"parent_id": HEAD, "package_id": DRAFT, "composition_id": BAG})
+            return Response({"parent_id": HEAD, "package_id": DRAFT,
+                             "composition_id": BAG, "session_id": SAVED_SESSION})
         if req.full_url.endswith("/agent-state?parent_id=" + HEAD):
             return Response({"head": HEAD, "draft_id": DRAFT, "composition_id": BAG,
                              "mutation_rev": 2, "studio_owned": True})
@@ -340,9 +415,9 @@ def test_studio_owned_saved_job_refuses_before_mutating_post(name: str, argument
     ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB}, "agent-cancel"),
     ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB, "execution_target": "saved"}, "agent-cancel"),
     ("rematte_layer", {"render_id": "r1", "job_id": JOB,
-                       "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}}, "agent-rematte"),
+                       "alpha": {"mode": "opaque"}}, "agent-rematte"),
     ("rematte_layer", {"render_id": "r1", "job_id": JOB, "execution_target": "saved",
-                       "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"},
+                       "alpha": {"mode": "opaque"},
                        "target": {"layer_id": "pl_enamel1", "asset": "take.png",
                                   "recipeSource": "take.hextile.json", "takes_fingerprint": "fp"}}, "agent-rematte"),
 ])
@@ -352,9 +427,11 @@ def test_saved_job_controls_use_agent_only_routes(name: str, args: dict[str, Any
     def opener(req: Any, timeout: Any = None) -> Response:
         if req.full_url.endswith("/generate/" + JOB):
             return Response({"job_id": JOB, "parent_id": HEAD, "package_id": DRAFT,
-                             "composition_id": BAG, "state": "admitted"})
+                             "composition_id": BAG, "session_id": SAVED_SESSION, "state": "admitted",
+                             "rgb_draft": {"token": "rgb-token"}})
         if req.full_url.endswith("/agent-state?parent_id=" + HEAD):
-            return Response({"draft_id": DRAFT, "composition_id": BAG, "studio_owned": False})
+            return Response({"head": HEAD, "draft_id": DRAFT, "composition_id": BAG,
+                             "studio_owned": False})
         if req.get_method() == "POST" and "/api/renders/" in req.full_url:
             posts.append((req.full_url, json.loads(req.data) if req.data else None))
             return Response({"job_id": JOB, "state": "cancelled", "released": True})

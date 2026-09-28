@@ -1399,7 +1399,7 @@ TOOLS: list[dict[str, Any]] = [
             "mode": {"type": "string", "enum": ["generate", "regen", "variation"]},
             "controls": _LAYER_CONTROLS,
             "source_layer_id": {"type": "string", "maxLength": 64},
-            "source_asset": {"type": "string", "pattern": "^[^/\\\\]+\\.png$"},
+            "source_asset": {"type": "string", "pattern": r"^[^\x2f\x5c]+\.png$"},
             "recipeSource": {"type": "string", "pattern": "^[0-9a-f]{32}\\.hextile\\.json$"},
             "edits": _LAYER_EDITS, "takes_fingerprint": {"type": "string", "maxLength": 4096},
             "scene_source": _layer_object({
@@ -1425,7 +1425,8 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "rematte_layer",
-        "Re-matte an exact retained RGB token, or Keep rectangle with alpha.mode=opaque. "
+        "Re-matte an exact retained RGB draft, or Keep rectangle with alpha.mode=opaque. "
+        "External MCP must supply rgb_draft from the exact job; approved internal Copilot omits it. "
         "execution_target defaults to saved; live requires an approved internal Copilot turn. "
         "target selects the recovery take, not saved/live execution. One call only: the server mints "
         "the new job id, so transport loss is unknown and non-replayable.",
@@ -1433,7 +1434,7 @@ TOOLS: list[dict[str, Any]] = [
          "rgb_draft": {"type": "string", "minLength": 8, "maxLength": 200},
          "alpha": _LAYER_ALPHA, "target": _LAYER_RECOVERY_TARGET,
          "execution_target": _LAYER_TARGET},
-        required=["render_id", "job_id", "rgb_draft", "alpha"],
+        required=["render_id", "job_id", "alpha"],
     ),
     _tool_def(
         "land_generated_layer",
@@ -1583,7 +1584,7 @@ def _seed_activity(name: str, args: Mapping[str, Any], payload: Any = None) -> O
     return seed
 
 
-def _layer_receipt(name: str, data: Any) -> dict[str, Any]:
+def _layer_receipt(name: str, data: Any, *, internal_mode: bool = False) -> dict[str, Any]:
     """Project APP's private generation payload into bounded MCP facts."""
     if not isinstance(data, Mapping):
         raise HextileClientError("Invalid Layers response from APP", kind="other")
@@ -1606,7 +1607,14 @@ def _layer_receipt(name: str, data: Any) -> dict[str, Any]:
             result["alpha"] = {key: alpha[key] for key in ("mode", "method", "model_id", "revision") if key in alpha}
         draft = data.get("rgb_draft")
         if isinstance(draft, Mapping):
-            result["rgb_draft"] = {key: draft[key] for key in ("token", "expires_at") if key in draft}
+            if internal_mode:
+                result["rgb_draft"] = {"available": True}
+                if "expires_at" in draft:
+                    result["rgb_draft"]["expires_at"] = draft["expires_at"]
+            else:
+                result["rgb_draft"] = {key: draft[key] for key in ("token", "expires_at") if key in draft}
+        elif internal_mode:
+            result["rgb_draft"] = {"available": False}
         error = data.get("error")
         if isinstance(error, Mapping) and "code" in error:
             result["error"] = {"code": error["code"]}
@@ -2166,45 +2174,63 @@ class HextileMcpServer:
     def _get_layer_generation(self, args: dict[str, Any]) -> Any:
         return _layer_receipt("get_layer_generation", self.client.get_layer_generation(
             str(args["render_id"]), str(args["job_id"])
-        ))
+        ), internal_mode=self.internal_mode)
 
-    def _saved_layer_job(self, args: dict[str, Any]) -> None:
+    def _saved_layer_job(self, args: dict[str, Any]) -> Mapping[str, Any]:
         job = self.client.get_layer_generation(str(args["render_id"]), str(args["job_id"]))
         if not isinstance(job, Mapping):
             raise HextileClientError("Layer job is unavailable", status_code=409, kind="http")
         state = self.client.get_layer_draft(str(args["render_id"]), str(job.get("parent_id") or ""))
         if (not isinstance(state, Mapping) or state.get("studio_owned")
+                or not re.fullmatch(r"agent-[0-9a-f]{32}", str(job.get("session_id") or ""))
+                or state.get("head") != job.get("parent_id")
                 or state.get("draft_id") != job.get("package_id")
                 or state.get("composition_id") != job.get("composition_id")):
             raise HextileClientError("Layer job is not owned by the exact saved draft.",
                                      status_code=409, kind="http")
+        return job
 
     def _cancel_layer_generation(self, args: dict[str, Any]) -> Any:
         execution_target = args.get("execution_target", "saved")
         if execution_target == "live":
             return _layer_receipt("cancel_layer_generation", self.client.creative_live(
                 "cancel_layer_generation", args
-            ))
+            ), internal_mode=self.internal_mode)
         if execution_target != "saved":
             raise HextileClientError("execution_target must be saved or live", kind="other")
         self._saved_layer_job(args)
         return _layer_receipt("cancel_layer_generation", self.client.cancel_layer_generation(
             str(args["render_id"]), str(args["job_id"])
-        ))
+        ), internal_mode=self.internal_mode)
 
     def _rematte_layer(self, args: dict[str, Any]) -> Any:
         execution_target = args.get("execution_target", "saved")
+        if self.internal_mode and "rgb_draft" in args:
+            raise HextileClientError("Internal Re-matte resolves the exact retained RGB draft privately; omit rgb_draft.",
+                                     status_code=400, kind="http")
         if execution_target == "live":
-            return _layer_receipt("rematte_layer", self.client.creative_live("rematte_layer", args))
+            return _layer_receipt("rematte_layer", self.client.creative_live("rematte_layer", args),
+                                  internal_mode=self.internal_mode)
         if execution_target != "saved":
             raise HextileClientError("execution_target must be saved or live", kind="other")
-        self._saved_layer_job(args)
-        body = {"version": 1, "rgb_draft": args["rgb_draft"], "alpha": args["alpha"]}
+        job = self._saved_layer_job(args)
+        if self.internal_mode:
+            draft = job.get("rgb_draft")
+            token = draft.get("token") if isinstance(draft, Mapping) else None
+            if not isinstance(token, str) or not 8 <= len(token) <= 200:
+                raise HextileClientError("Retained RGB draft is unavailable for this exact job.",
+                                         status_code=409, kind="http")
+        else:
+            token = args.get("rgb_draft")
+            if not isinstance(token, str) or not 8 <= len(token) <= 200:
+                raise HextileClientError("External Re-matte requires the exact rgb_draft token.",
+                                         status_code=400, kind="http")
+        body = {"version": 1, "rgb_draft": token, "alpha": args["alpha"]}
         if "target" in args:
             body["target"] = args["target"]
         return _layer_receipt("rematte_layer", self.client.rematte_layer(
             str(args["render_id"]), str(args["job_id"]), body
-        ))
+        ), internal_mode=self.internal_mode)
 
     def _land_generated_layer(self, args: dict[str, Any]) -> Any:
         return self._layer_saved_or_live("land_generated_layer", args, frozenset({
