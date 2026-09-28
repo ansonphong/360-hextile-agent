@@ -1346,7 +1346,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "target": _LAYER_TARGET, "render_id": {"type": "string"},
             "request_id": _LAYER_JOB_ID, "expected_head": _LAYER_ID, "parent_id": _LAYER_ID,
-            "expected_draft_id": _LAYER_ID, "expected_mutation_rev": {"type": "integer", "minimum": 1},
+            "expected_draft_id": _LAYER_ID, "expected_mutation_rev": {"type": "integer", "minimum": 0},
             "mode": {"type": "string", "enum": ["generate", "regen", "variation"]},
             "controls": _LAYER_CONTROLS,
             "source_layer_id": {"type": "string", "maxLength": 64},
@@ -1390,7 +1390,7 @@ TOOLS: list[dict[str, Any]] = [
          "layer_id": {"type": "string", "pattern": "^pl_[A-Za-z0-9_-]{3,}$", "maxLength": 64},
          "job_id": _LAYER_JOB_ID, "expected_head": _LAYER_ID, "draft_id": _LAYER_ID,
          "composition_id": {"type": "string", "pattern": "^comp_[0-9a-f]{12}$"},
-         "expected_mutation_rev": {"type": "integer", "minimum": 1},
+         "expected_mutation_rev": {"type": "integer", "minimum": 0},
          "pose": _LAYER_POSE, "source_layer_id": {"type": "string", "maxLength": 64}},
         required=["target", "render_id", "layer_id", "job_id", "expected_head", "draft_id",
                   "composition_id", "expected_mutation_rev", "pose"],
@@ -1402,7 +1402,7 @@ TOOLS: list[dict[str, Any]] = [
         {"target": _LAYER_TARGET, "render_id": {"type": "string"},
          "parent_id": _LAYER_ID, "draft_id": _LAYER_ID,
          "composition_id": {"type": "string", "pattern": "^comp_[0-9a-f]{12}$"},
-         "expected_mutation_rev": {"type": "integer", "minimum": 1}},
+         "expected_mutation_rev": {"type": "integer", "minimum": 0}},
         required=["target", "render_id", "parent_id", "draft_id", "composition_id", "expected_mutation_rev"],
     ),
 ]

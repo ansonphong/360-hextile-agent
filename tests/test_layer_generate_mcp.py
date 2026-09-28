@@ -59,6 +59,15 @@ def test_seven_closed_tools_and_policy() -> None:
     assert catalog["land_generated_layer"]["inputSchema"]["properties"]["pose"]["additionalProperties"] is False
 
 
+@pytest.mark.parametrize("name", ["generate_layer", "land_generated_layer", "commit_layer_draft"])
+def test_live_empty_layers_revision_is_admitted_but_negative_revision_is_not(name: str) -> None:
+    tool = next(tool for tool in TOOLS if tool["name"] == name)
+    revision = tool["inputSchema"]["properties"]["expected_mutation_rev"]
+    assert revision == {"type": "integer", "minimum": 0}
+    assert 0 >= revision["minimum"]
+    assert -1 < revision["minimum"]
+
+
 def test_saved_lifecycle_uses_named_routes_and_strips_private_payload() -> None:
     seen: list[tuple[str, str, Any]] = []
 
