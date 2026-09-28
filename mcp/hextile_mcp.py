@@ -9,6 +9,7 @@ Catalog + persist + run + monitor + config + seed + models + guides + live conte
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import os
@@ -104,6 +105,9 @@ TOOL_NAMES = (
     "rematte_layer",
     "land_generated_layer",
     "commit_layer_draft",
+    "preflight_spot_clone",
+    "clone_spot",
+    "get_spot_clone",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -140,6 +144,8 @@ _READ_ONLY = frozenset(
         "preflight_file_export",
         "get_layer_draft",
         "get_layer_generation",
+        "preflight_spot_clone",
+        "get_spot_clone",
     }
 )
 _MUTATING = frozenset(
@@ -174,6 +180,7 @@ _MUTATING = frozenset(
         "rematte_layer",
         "land_generated_layer",
         "commit_layer_draft",
+        "clone_spot",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -223,6 +230,7 @@ _LAYER_TOOLS = frozenset({
     "get_layer_draft", "generate_layer", "get_layer_generation", "cancel_layer_generation",
     "rematte_layer", "land_generated_layer", "commit_layer_draft",
 })
+_SPOT_CLONE_TOOLS = frozenset({"preflight_spot_clone", "clone_spot", "get_spot_clone"})
 _PRIVATE_ARGUMENT_KEYS = frozenset(
     {
         "actor",
@@ -402,6 +410,47 @@ _LAYER_RECOVERY_TARGET = _layer_object({
     "asset": {"type": "string"}, "recipeSource": {"type": "string"},
     "takes_fingerprint": {"type": "string", "maxLength": 4096},
 }, ("layer_id", "asset", "recipeSource", "takes_fingerprint"))
+
+_CLONE_NODE_ID = {"type": "string", "pattern": "^[0-9a-f]{12}$"}
+_CLONE_PARENT_ID = {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}
+_CLONE_FINGERPRINT = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+_CLONE_POSE = _layer_object({
+    "yaw": {"type": "number", "minimum": -180, "maximum": 180},
+    "pitch": {"type": "number", "minimum": -90, "maximum": 90},
+    "roll": {"type": "number", "minimum": -180, "maximum": 180},
+}, ("yaw", "pitch"))
+_CLONE_DESTINATION_POSE = _layer_object({
+    **_CLONE_POSE["properties"], "fov": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180},
+}, ("yaw", "pitch", "roll", "fov"))
+_CLONE_MASK_COMMON = {
+    "blend_clip": {"type": "number", "minimum": 0, "maximum": 1},
+    "blend_blur": {"type": "integer", "minimum": 0, "maximum": 128},
+}
+_CLONE_MASK = {
+    "oneOf": [
+        _layer_object({
+            **_CLONE_MASK_COMMON, "source": {"const": "shape"},
+            "shape": {"type": "string", "enum": ["triangle", "square", "pentagon", "hexagon", "kite", "rhombus", "circle"]},
+            "sides": {"type": "integer", "minimum": 3, "maximum": 64},
+            "radius": {"type": "number", "exclusiveMinimum": 0, "maximum": 1024},
+            "roll": {"type": "number", "minimum": -180, "maximum": 180},
+            "aspect": {"type": "number", "minimum": 0.1, "maximum": 10},
+            "corner_radius": {"type": "number", "minimum": 0, "maximum": 1},
+            "inpaint_blur": {"type": "integer", "minimum": 0, "maximum": 255},
+        }, ("source",)),
+        _layer_object({
+            **_CLONE_MASK_COMMON, "source": {"const": "from_template"},
+            "template_id": _CLONE_PARENT_ID,
+            "face_index": {"type": "integer", "minimum": 0, "maximum": 4095},
+        }, ("source", "template_id")),
+        _layer_object({
+            **_CLONE_MASK_COMMON, "source": {"const": "from_raster"},
+            "raster_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}\\.png$"},
+            "grow_px": {"type": "integer", "minimum": -64, "maximum": 64},
+            "inpaint_blur": {"type": "integer", "minimum": 0, "maximum": 255},
+        }, ("source", "raster_id")),
+    ],
+}
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -1405,6 +1454,47 @@ TOOLS: list[dict[str, Any]] = [
          "expected_mutation_rev": {"type": "integer", "minimum": 0}},
         required=["target", "render_id", "parent_id", "draft_id", "composition_id", "expected_mutation_rev"],
     ),
+    _tool_def(
+        "preflight_spot_clone",
+        "Read-only Spot Clone readiness for an exact saved render parent. Returns HEAD, "
+        "bounded mask selectors and mutable source fingerprints; no viewer needed.",
+        {"render_id": {"type": "string"}, "parent_id": _CLONE_PARENT_ID},
+        required=["render_id", "parent_id"],
+    ),
+    {
+        "name": "clone_spot",
+        "description": "After explicit approval, clone one saved render from a witnessed parent and mask, "
+        "or commit only an already prepared live Spot Clone through the private Copilot ticket. "
+        "Keep node_id stable; a lost reply requires get_spot_clone, never a new id.",
+        "inputSchema": {
+            "type": "object",
+            "oneOf": [
+                _layer_object({
+                    "target": {"const": "saved"}, "render_id": {"type": "string"},
+                    "node_id": _CLONE_NODE_ID, "expected_head": _CLONE_PARENT_ID,
+                    "parent_id": _CLONE_PARENT_ID, "destination_id": _CLONE_PARENT_ID,
+                    "source_pose": _CLONE_POSE, "destination_pose": _CLONE_DESTINATION_POSE,
+                    "mask": _CLONE_MASK, "expected_mask_fingerprint": _CLONE_FINGERPRINT,
+                }, ("target", "render_id", "node_id", "expected_head", "parent_id",
+                    "destination_id", "source_pose", "destination_pose", "mask")),
+                _layer_object({
+                    "target": {"const": "live"}, "render_id": {"type": "string"},
+                    "node_id": _CLONE_NODE_ID, "expected_head": _CLONE_PARENT_ID,
+                    "prepared_operation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "expected_mask_fingerprint": _CLONE_FINGERPRINT,
+                }, ("target", "render_id", "node_id", "expected_head",
+                    "prepared_operation_id", "expected_mask_fingerprint")),
+            ],
+        },
+        "annotations": _annotations("clone_spot"),
+    },
+    _tool_def(
+        "get_spot_clone",
+        "Read the stored receipt for one exact Spot Clone node after an unknown reply. "
+        "A missing node remains unknown; only POST detects a different recipe under the same id.",
+        {"render_id": {"type": "string"}, "node_id": _CLONE_NODE_ID},
+        required=["render_id", "node_id"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
@@ -1624,6 +1714,9 @@ class HextileMcpServer:
             "rematte_layer": self._rematte_layer,
             "land_generated_layer": self._land_generated_layer,
             "commit_layer_draft": self._commit_layer_draft,
+            "preflight_spot_clone": self._preflight_spot_clone,
+            "clone_spot": self._clone_spot,
+            "get_spot_clone": self._get_spot_clone,
         }
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -1761,7 +1854,7 @@ class HextileMcpServer:
                 else "succeeded"
             )
             # Batch and seed IDs must never enter run.run_id (Render consumers).
-            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") or name in _LAYER_TOOLS else _run_from_payload(data)
+            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") or name in _LAYER_TOOLS or name in _SPOT_CLONE_TOOLS else _run_from_payload(data)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
@@ -2106,6 +2199,83 @@ class HextileMcpServer:
         return self._layer_saved_or_live("commit_layer_draft", args, frozenset({
             "parent_id", "draft_id", "composition_id", "expected_mutation_rev",
         }))
+
+    def _preflight_spot_clone(self, args: dict[str, Any]) -> Any:
+        if set(args) != {"render_id", "parent_id"}:
+            raise HextileClientError("Spot Clone preflight needs only render_id and parent_id", kind="other")
+        return self.client.preflight_spot_clone(args["render_id"], args["parent_id"])
+
+    def _get_spot_clone(self, args: dict[str, Any]) -> Any:
+        if set(args) != {"render_id", "node_id"} or not re.fullmatch(r"[0-9a-f]{12}", str(args.get("node_id", ""))):
+            raise HextileClientError("Spot Clone receipt needs exact render_id and 12-hex node_id", kind="other")
+        return self.client.get_spot_clone(args["render_id"], args["node_id"])
+
+    def _clone_spot(self, args: dict[str, Any]) -> Any:
+        target = args.get("target")
+        if target == "live" and not self.internal_mode:
+            raise HextileClientError("Live Spot Clone requires an approved internal Copilot turn.",
+                                     status_code=403, kind="http")
+        if target not in {"saved", "live"}:
+            raise HextileClientError("Spot Clone target must be saved or live", kind="other")
+        common = {"target", "render_id", "node_id", "expected_head"}
+        if target == "live":
+            required = common | {"prepared_operation_id", "expected_mask_fingerprint"}
+            if set(args) != required:
+                raise HextileClientError("Live Spot Clone takes only its prepared operation witness", kind="other")
+            if not re.fullmatch(r"[0-9a-f]{12}", str(args["node_id"])):
+                raise HextileClientError("Spot Clone needs a stable 12-hex node_id", kind="other")
+            try:
+                ticket = self.client.creative_live("clone_spot", args)
+                if not isinstance(ticket, Mapping) or ticket.get("status") != "pending":
+                    raise HextileClientError("Live Spot Clone acknowledgement was incomplete",
+                                             kind="spot_clone_outcome_unknown")
+                return ticket
+            except (HextileClientError, http.client.HTTPException) as exc:
+                if not (isinstance(exc, http.client.HTTPException) or
+                        isinstance(exc, HextileClientError) and exc.kind in {
+                            "app_down", "spot_clone_outcome_unknown",
+                        }):
+                    raise
+                raise HextileClientError(
+                    "Live Spot Clone outcome unknown. Read get_spot_clone by the same render_id "
+                    "and node_id; do not start a new operation.",
+                    kind="spot_clone_outcome_unknown",
+                    receipt={"state": "unknown", "render_id": args["render_id"],
+                             "node_id": args["node_id"], "reconcile": "get_spot_clone"},
+                ) from exc
+
+        required = common | {"parent_id", "destination_id", "source_pose", "destination_pose", "mask"}
+        allowed = required | {"expected_mask_fingerprint"}
+        if not required <= set(args) or set(args) - allowed:
+            raise HextileClientError("Saved Spot Clone needs only the exact witnessed recipe", kind="other")
+        if (not re.fullmatch(r"[0-9a-f]{12}", str(args["node_id"]))
+                or args["expected_head"] != args["parent_id"]):
+            raise HextileClientError("Saved Spot Clone needs a stable node_id and matching parent/HEAD", kind="other")
+        mask = args["mask"]
+        if not isinstance(mask, dict):
+            raise HextileClientError("Spot Clone mask must be a closed selector", kind="other")
+        source = mask.get("source")
+        mask_keys = {
+            "shape": {"source", "shape", "sides", "radius", "roll", "aspect", "corner_radius",
+                      "inpaint_blur", "blend_clip", "blend_blur"},
+            "from_template": {"source", "template_id", "face_index", "blend_clip", "blend_blur"},
+            "from_raster": {"source", "raster_id", "grow_px", "inpaint_blur", "blend_clip", "blend_blur"},
+        }
+        if source not in mask_keys or set(mask) - mask_keys[source]:
+            raise HextileClientError("Spot Clone mask must be a closed shape/template/raster selector", kind="other")
+        if source == "shape":
+            if "expected_mask_fingerprint" in args:
+                raise HextileClientError("Shape masks do not take a source fingerprint", kind="other")
+        elif (not isinstance(args.get("expected_mask_fingerprint"), str)
+              or not re.fullmatch(r"[0-9a-f]{64}", args["expected_mask_fingerprint"])):
+            raise HextileClientError("Template/raster masks need the exact preflight fingerprint", kind="other")
+        for pose_name, pose_keys in (("source_pose", {"yaw", "pitch", "roll"}),
+                                     ("destination_pose", {"yaw", "pitch", "roll", "fov"})):
+            pose = args[pose_name]
+            if not isinstance(pose, dict) or set(pose) - pose_keys:
+                raise HextileClientError(f"{pose_name} must be a closed pose", kind="other")
+        body = {key: args[key] for key in allowed - {"target", "render_id"} if key in args}
+        return self.client.clone_spot(args["render_id"], body)
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

@@ -117,6 +117,9 @@ EXPECTED_TOOLS = (
     "rematte_layer",
     "land_generated_layer",
     "commit_layer_draft",
+    "preflight_spot_clone",
+    "clone_spot",
+    "get_spot_clone",
 )
 
 
@@ -174,6 +177,8 @@ def test_open4_annotations_partition() -> None:
     assert {"get_model_readiness", "get_model_download_queue"} <= _READ_ONLY
     assert {"install_model", "repair_model", "cancel_model_download"} <= _MUTATING
     assert "cancel_model_download" in _DESTRUCTIVE
+    assert {"preflight_spot_clone", "get_spot_clone"} <= _READ_ONLY
+    assert "clone_spot" in _MUTATING
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:

@@ -432,9 +432,43 @@ class Client:
     def creative_live(self, tool_name: str, arguments: Mapping[str, Any]) -> Any:
         headers = _REQUEST_HEADERS.get()
         if not self.internal_mode or not headers.get("X-Hextile-Copilot-Token") or not headers.get("X-Hextile-Op"):
-            raise HextileClientError("Live Layers actions require an approved internal Copilot turn.",
+            raise HextileClientError("Live creative actions require an approved internal Copilot turn.",
                                      status_code=403, kind="http")
         return self.post_json("/api/agent/creative-live", {"tool_name": tool_name, "arguments": dict(arguments)})
+
+    # ── saved Spot Clone ────────────────────────────────────────────────
+
+    def preflight_spot_clone(self, render_id: str, parent_id: str) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        return self.get_json(f"/api/renders/{rid}/spot-clone/agent-preflight",
+                             params={"parent_id": parent_id})
+
+    def clone_spot(self, render_id: str, body: Mapping[str, Any]) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        try:
+            result = self.post_json(f"/api/renders/{rid}/spot-clone/agent", body,
+                                    timeout=LONG_OPERATION_TIMEOUT_S)
+            if (not isinstance(result, Mapping) or result.get("node_id") != body["node_id"]
+                    or result.get("state") != "complete"):
+                raise HextileClientError("Spot Clone acknowledgement was incomplete",
+                                         kind="spot_clone_outcome_unknown")
+            return result
+        except (HextileClientError, http.client.HTTPException) as exc:
+            if not (_layer_transport_unknown(exc) or
+                    isinstance(exc, HextileClientError) and exc.kind == "spot_clone_outcome_unknown"):
+                raise
+            raise HextileClientError(
+                "Spot Clone outcome unknown. Read get_spot_clone with the same render_id "
+                "and node_id; do not retry with a new id.",
+                kind="spot_clone_outcome_unknown",
+                receipt={"state": "unknown", "render_id": render_id,
+                         "node_id": body["node_id"], "reconcile": "get_spot_clone"},
+            ) from exc
+
+    def get_spot_clone(self, render_id: str, node_id: str) -> Any:
+        rid = urllib.parse.quote(render_id, safe="")
+        nid = urllib.parse.quote(node_id, safe="")
+        return self.get_json(f"/api/renders/{rid}/spot-clone/agent/{nid}")
 
     def apply_config_delta(
         self,

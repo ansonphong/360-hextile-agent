@@ -15,6 +15,7 @@ See `references/agent-lexicon.md` for locked words, the complementarity card, an
 - MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
 - MCP cannot `goto` or arm/operate an open Layers session (`REFUSE_NAV_MCP`, `REFUSE_LAYERS_MCP`).
   The seven Generate Layer tools below are the narrow saved-render exception; live target requires an approved in-app Copilot turn.
+- MCP cannot arm Spot Clone, choose its source/destination in the viewer, or force a commit. The three Spot Clone tools below can act on an explicit saved render; `target=live` requires an approved internal Copilot turn with an already prepared operation.
 
 Before composing fields or teaching the user, call `get_guide` (`workflow-schema`, `best-practices`, `recipes`, `website-index`). Fetch website URLs from `website-index` when you need product-domain depth.
 
@@ -107,6 +108,9 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `rematte_layer` | Re-matte or Keep rectangle from a retained RGB token; uncertain acknowledgement is non-replayable | **yes** |
 | `land_generated_layer` | Land one exact ready pair into the witnessed v6 draft; no graph commit | **yes** |
 | `commit_layer_draft` | Explicitly bake the witnessed draft onto HEAD as a final Layers node | **yes** |
+| `preflight_spot_clone` | Inspect exact saved parent/HEAD and available shape, template, or render-local raster fingerprints | no |
+| `clone_spot` | Explicit saved clone with stable node id and mask witness; live only through approved prepared Copilot operation | **yes** |
+| `get_spot_clone` | Read one exact graph node/digest receipt after an uncertain clone result | no |
 
 ### Selection guide
 
@@ -138,6 +142,10 @@ For `install_model(bundle=true)`, use the selected primary's current default-cat
 Get approval for each mutation and keep the exact render, HEAD, draft, composition and revision from `get_layer_draft`. Use `generate_layer(target=saved, mode=generate, request_id=<32 lowercase hex>, ...)`, then poll `get_layer_generation` by that same id until `ready`. Ready is only an artifact; call `land_generated_layer(target=saved, layer_id=<stable pl_ id>, ...)` to insert one atom, then explicitly call `commit_layer_draft(target=saved, ...)` with the fresh revision if a graph node is wanted. Generation does not land, and land does not commit. An open studio-owned draft refuses saved mutation; MCP does not arm or retarget the viewer.
 
 For Re-gen or variation, inspect the active layer's exact bare `asset`, `recipeSource` and `takes_fingerprint`; Re-gen preserves pose and permits at most eight takes. The draft permits at most 64 layers. `rematte_layer` uses the retained `rgb_draft.token` and a server-minted job id; a lost reply is unknown and must not be replayed. If start, land, or commit loses its reply, reconcile by the original request/job/layer/draft ids and exact saved state before any newly approved attempt. A missing RAM job after restart remains unknown, not a reason to invent a new id. `cancel_layer_generation` requests stop; poll for terminal `released` before claiming the GPU job ended. External MCP `target=live` returns 403; only the private, approved Copilot path may operate an already armed Layers session.
+
+### Spot Clone on a saved render
+
+Read `preflight_spot_clone(render_id,parent_id)` and require its exact HEAD and final parent before asking for approval to write. Choose an explicit destination label and source/destination poses; the agent never selects them in the viewer. A shape mask has no fingerprint; a template or raster selector must carry the matching SHA-256 from preflight. `clone_spot(target=saved,...)` uses one stable 12-lowercase-hex `node_id`, no force or path/pixel upload. Read `get_spot_clone` by that same id after a lost response. A missing receipt remains unknown; never mint a new id or claim the graph write was cancelled. Stop prevents new calls but cannot undo an accepted graph node; use normal graph history/Undo for a completed node. External `target=live` is forbidden.
 
 ## Upres
 

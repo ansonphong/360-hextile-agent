@@ -116,3 +116,22 @@ commit_layer_draft(target="saved", render_id="r-123", parent_id="aaaaaaaaaaaa",
 ```
 
 `ready` does not insert a layer. Land does not commit. If any acknowledgement is lost, reconcile the exact request/job/layer/draft IDs with `get_layer_generation` and `get_layer_draft`; inspect graph HEAD for an uncertain commit. Never send a fresh request or layer ID as an automatic retry. A missing RAM job after restart remains unknown. A rematte reply loss is non-replayable because APP chooses its new job ID; inspect local job activity before asking for another approved action. Max 64 layers per draft and eight takes per Re-gen layer. External `target=live` is forbidden.
+
+## Recipe H — Spot Clone on an exact saved render
+
+No viewer is required. Choose a final parent and explicit source/destination poses; ask approval for the clone write. The IDs below are examples, not defaults.
+
+```text
+preflight_spot_clone(render_id="r-123", parent_id="aaaaaaaaaaaa")
+# Require head == parent_id and parent_final. Choose a listed template/raster
+# fingerprint, or use a deterministic shape with no fingerprint.
+clone_spot(target="saved", render_id="r-123", node_id="bbbbbbbbbbbb",
+  expected_head="aaaaaaaaaaaa", parent_id="aaaaaaaaaaaa",
+  destination_id="spot-copy-1",
+  source_pose={"yaw":10,"pitch":0},
+  destination_pose={"yaw":30,"pitch":10,"roll":0,"fov":45},
+  mask={"source":"shape","shape":"hexagon"})
+get_spot_clone(render_id="r-123", node_id="bbbbbbbbbbbb")
+```
+
+For `from_template`, use the listed `template_id` and `face_index`; for `from_raster`, use a listed render-local `raster_id`. Both require `expected_mask_fingerprint` equal to that preflight entry's fingerprint. A changed mask or HEAD refuses the write. On a lost POST reply, read the exact node receipt and recipe digest; 404 remains unknown, not permission for a new id. Stop cannot undo a graph node that already committed. External MCP cannot use `target=live`; Copilot may commit only an already prepared, matching Spot Clone operation after its own approval.
