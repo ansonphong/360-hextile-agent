@@ -15,6 +15,7 @@ from contextvars import ContextVar
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
@@ -273,9 +274,36 @@ class Client:
     def export_render_file(self, render_id: str, body: Mapping[str, Any]) -> Any:
         rid = urllib.parse.quote(render_id, safe="")
         try:
-            return self.post_json(
+            receipt = self.post_json(
                 f"/api/renders/{rid}/export", body, timeout=LONG_OPERATION_TIMEOUT_S
             )
+            destination = Path(str(body["destination"]))
+            paths = receipt.get("paths") if isinstance(receipt, Mapping) else None
+            expected_count = 6 if body.get("layout") == "six_faces" else 1
+            valid_paths = (
+                isinstance(paths, list)
+                and len(paths) == expected_count
+                and all(
+                    isinstance(path, str) and path and Path(path).is_absolute()
+                    for path in paths
+                )
+                and len(set(paths)) == expected_count
+            )
+            if (
+                not isinstance(receipt, Mapping)
+                or receipt.get("outcome") != "complete"
+                or not valid_paths
+                or (expected_count == 1 and paths[0] != str(destination))
+                or (
+                    expected_count == 6
+                    and any(Path(path).parent != destination for path in paths)
+                )
+            ):
+                raise HextileClientError(
+                    "Export outcome unknown; inspect the destination before a new attempt.",
+                    kind="file_outcome_unknown",
+                )
+            return receipt
         except http.client.HTTPException as exc:
             raise HextileClientError(
                 "Export outcome unknown; inspect the destination before a new attempt.",
@@ -283,11 +311,16 @@ class Client:
                 kind="file_outcome_unknown",
             ) from exc
         except HextileClientError as exc:
-            if exc.kind == "app_down":
+            malformed_2xx = (
+                exc.kind == "other"
+                and exc.status_code is not None
+                and 200 <= exc.status_code < 300
+            )
+            if exc.kind == "app_down" or malformed_2xx:
                 raise HextileClientError(
                     "Export outcome unknown; inspect the destination before a new attempt.",
                     status_code=exc.status_code,
-                    body=exc.body,
+                    body=None if malformed_2xx else exc.body,
                     kind="file_outcome_unknown",
                 ) from exc
             raise

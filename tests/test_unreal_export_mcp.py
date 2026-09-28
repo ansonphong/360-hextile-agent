@@ -146,7 +146,7 @@ def test_tool_names_include_export() -> None:
     assert "export_to_unreal_project" in TOOL_NAMES
     assert "preflight_file_export" in TOOL_NAMES
     assert "export_render_file" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == len(TOOLS)
 
 
 def _file_args(folder: Path) -> dict[str, Any]:
@@ -165,7 +165,8 @@ def _export_requests(seen: dict[str, Any]) -> list[tuple[str, Any, Any]]:
 
 def test_file_preflight_and_export_proxy_exact_body(tmp_path: Path) -> None:
     seen: dict[str, Any] = {}
-    server = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen)))
+    receipt = {"outcome": "complete", "paths": [str(tmp_path.resolve() / "sky.jpg")]}
+    server = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen, receipt)))
     args = _file_args(tmp_path)
     assert not server.call_tool("preflight_file_export", args)["isError"]
     preflight_url, preflight_data, preflight_timeout = _export_requests(seen)[0]
@@ -245,3 +246,88 @@ def test_file_export_truncated_response_is_one_attempt_unknown(tmp_path: Path) -
     assert "file_outcome_unknown" in json.dumps(result)
     assert len(_export_requests(seen)) == 1
     assert _export_requests(seen)[0][2] == LONG_OPERATION_TIMEOUT_S
+
+
+@pytest.mark.parametrize("raw", [b"", b"{bad json", b"{}", b'{"outcome":"complete","paths":[]}'])
+def test_file_export_unusable_2xx_is_one_attempt_unknown(tmp_path: Path, raw: bytes) -> None:
+    seen: dict[str, Any] = {}
+
+    class RawResponse(_Resp):
+        def read(self) -> bytes:
+            return raw
+
+    def opener(req, timeout=None):  # noqa: ANN001
+        seen.setdefault("requests", []).append((req.full_url, req.data, timeout))
+        return RawResponse()
+
+    args = _file_args(tmp_path) | {"source_revision": "rev", "output_fingerprint": "fingerprint"}
+    result = HextileMcpServer(client=Client(base_url=BASE, opener=opener)).call_tool("export_render_file", args)
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert "inspect the destination" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+
+
+@pytest.mark.parametrize("paths", [
+    ["/other/sky.jpg"],
+    ["relative/sky.jpg"],
+    ["/other/sky.jpg", "/other/twice.jpg"],
+])
+def test_file_export_wrong_single_receipt_is_unknown(tmp_path: Path, paths: list[str]) -> None:
+    seen: dict[str, Any] = {}
+    receipt = {"outcome": "complete", "paths": paths}
+    args = _file_args(tmp_path) | {"source_revision": "rev", "output_fingerprint": "fingerprint"}
+    result = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen, receipt))).call_tool(
+        "export_render_file", args
+    )
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+
+
+def test_file_export_valid_six_face_receipt(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+    folder = tmp_path.resolve() / "faces"
+    paths = [str(folder / f"sky_{face}.png") for face in ("px", "nx", "py", "ny", "pz", "nz")]
+    receipt = {"outcome": "complete", "paths": paths}
+    args = _file_args(tmp_path) | {
+        "output_name": "faces", "projection": "cubemap_cross", "encoding": "png",
+        "layout": "six_faces", "source_revision": "rev", "output_fingerprint": "fingerprint",
+    }
+    result = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen, receipt))).call_tool(
+        "export_render_file", args
+    )
+    assert not result["isError"]
+    assert len(_export_requests(seen)) == 1
+
+
+def test_file_export_six_face_escape_is_unknown(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+    folder = tmp_path.resolve() / "faces"
+    paths = [str(folder / f"sky_{face}.png") for face in ("px", "nx", "py", "ny", "pz")]
+    receipt = {"outcome": "complete", "paths": paths + [str(tmp_path.resolve() / "sky_nz.png")]}
+    args = _file_args(tmp_path) | {
+        "output_name": "faces", "projection": "cubemap_cross", "encoding": "png",
+        "layout": "six_faces", "source_revision": "rev", "output_fingerprint": "fingerprint",
+    }
+    result = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen, receipt))).call_tool(
+        "export_render_file", args
+    )
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+
+
+def test_file_export_http_refusal_stays_explicit(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+
+    def opener(req, timeout=None):  # noqa: ANN001
+        seen.setdefault("requests", []).append((req.full_url, req.data, timeout))
+        raise urllib.error.HTTPError(req.full_url, 409, "Conflict", {}, io.BytesIO(b'{"detail":"destination_exists"}'))
+
+    args = _file_args(tmp_path) | {"source_revision": "rev", "output_fingerprint": "fingerprint"}
+    result = HextileMcpServer(client=Client(base_url=BASE, opener=opener)).call_tool("export_render_file", args)
+    assert result["isError"]
+    assert "destination_exists" in json.dumps(result)
+    assert "file_outcome_unknown" not in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
