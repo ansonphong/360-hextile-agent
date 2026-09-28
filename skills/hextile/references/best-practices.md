@@ -33,6 +33,9 @@ Send **`workflow_id` + `overrides`**, or a full `document` you cloned from `get_
 
 ## Safety
 
+- `get_gpu_diagnostics` reads `/api/processors/vram-status` through the app; the MCP process performs no GPU probe or cleanup. Read `device_index`, `accounting.nvml_sampled_at_unix_ms`, and `nvml_sample_age_ms` before describing a card snapshot. A cached sample retains its original acquisition time. Null sample fields mean NVML could not supply a valid sample.
+- Card used/free, compute-PID attribution, Torch/CuPy allocator pools, and registered model footprints are overlapping facts, not additive buckets. WDDM may leave `this_app_bytes` and `unaccounted_bytes` null; compute process enumeration does not cover every graphics process. `busy_state=unknown` is not evidence that a holder can be evicted. Workload-specific pressure advice is only an estimate; runtime admission decides whether a job can run.
+- An ordinary `retry_run(run_id)` sends no recovery body. Only after explicit user request and host mutation approval for the exact `run_id` and `vram_recovery=true` should the guarded retry be used; it may evict idle in-app holders for that render. An `approved` tool argument is not approval. Do not propose process killing or unload-all.
 - Cancel with `cancel_run` before starting a second heavy GPU job if one is `running`. `stop_sequence` before a second sequence if one is `processing`.
 - Keep the exact seed request and UUID through an uncertain acknowledgement. GET that UUID; if 404 is provisional, replay the same request and UUID or report unknown. `cancel_seed(job_id)` targets only that job.
 - GPU upres of many frames is a sequence via `/hextile-upres`, not a loop of `run_workflow` over a frame folder.

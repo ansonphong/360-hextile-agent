@@ -65,6 +65,7 @@ EXPECTED_TOOLS = (
     "run_workflow",
     "validate_config",
     "get_status",
+    "get_gpu_diagnostics",
     "get_render_config",
     "get_logs",
     "list_runs",
@@ -104,7 +105,7 @@ EXPECTED_TOOLS = (
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 43
+    assert len(EXPECTED_TOOLS) == 44
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -146,6 +147,8 @@ def test_open4_annotations_partition() -> None:
     assert "get_unreal_export_catalog" in _READ_ONLY
     assert "preflight_unreal_export" in _READ_ONLY
     assert "export_to_unreal_project" in _MUTATING
+    assert "get_gpu_diagnostics" in _READ_ONLY
+    assert "retry_run" in _MUTATING
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:
@@ -174,7 +177,58 @@ def test_app_tool_names_ast_equals() -> None:
     assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
     app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
     assert set(TOOL_NAMES) == app_names
-    assert len(app_names) == 43
+    assert len(app_names) == 44
+
+
+def test_gpu_diagnostics_and_retry_client_routes() -> None:
+    seen: list[tuple[str, str, Any]] = []
+
+    class Response:
+        status = 200
+
+        def read(self) -> bytes:
+            return b'{"device_index": 1, "accounting": {"nvml_sample_age_ms": 123}}'
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        seen.append((req.get_method(), req.full_url, json.loads(req.data) if req.data else None))
+        return Response()
+
+    client = Client(opener=opener)
+    result = client.get_gpu_diagnostics()
+    assert result["accounting"]["nvml_sample_age_ms"] == 123
+    client.retry_run("render-1")
+    client.retry_run("render-1", vram_recovery=False)
+    client.retry_run("render-1", vram_recovery=True)
+    assert seen == [
+        ("GET", "http://127.0.0.1:8000/api/processors/vram-status", None),
+        ("POST", "http://127.0.0.1:8000/api/renders/render-1/retry", None),
+        ("POST", "http://127.0.0.1:8000/api/renders/render-1/retry", None),
+        ("POST", "http://127.0.0.1:8000/api/renders/render-1/retry", {"vram_recovery": True}),
+    ]
+
+
+def test_gpu_diagnostics_tool_and_retry_mapping() -> None:
+    client = mock.Mock()
+    client.get_gpu_diagnostics.return_value = {"device_index": 1}
+    server = HextileMcpServer(client=client)
+    assert server._get_gpu_diagnostics({}) == {"device_index": 1}
+    client.get_gpu_diagnostics.assert_called_once_with()
+    server._retry_run({"run_id": "render-1"})
+    server._retry_run({"run_id": "render-1", "vram_recovery": False})
+    server._retry_run({"run_id": "render-1", "vram_recovery": True})
+    assert client.retry_run.call_args_list == [
+        mock.call("render-1", vram_recovery=False),
+        mock.call("render-1", vram_recovery=False),
+        mock.call("render-1", vram_recovery=True),
+    ]
+    assert _tool_schema("get_gpu_diagnostics")["properties"] == {}
+    assert _tool_schema("retry_run")["properties"]["vram_recovery"]["type"] == "boolean"
 
 
 def test_skill_tool_names_subset_of_mcp() -> None:

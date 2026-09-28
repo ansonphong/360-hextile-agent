@@ -57,11 +57,12 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `list_installed_models` | Installed weights — dry-run is Pydantic only | no |
 | `run_workflow` | Queue a render after overrides | **yes** |
 | `get_status` | Poll `run_id` progress / output paths | no |
+| `get_gpu_diagnostics` | Read app-owned GPU/VRAM snapshot, its sample age, and known/unknown holders | no |
 | `get_render_config` | Read producing .hextile.json for a render | no |
 | `get_logs` | Fetch failed-run logs | no |
 | `list_runs` | Find jobs if you lost `run_id` | no |
 | `cancel_run` | Kill a long GPU run | **yes** |
-| `retry_run` | Retry a crashed/failed run (APP returns 400 otherwise); uses APP tile-reuse policy | **yes** |
+| `retry_run` | Retry a crashed/failed run; `vram_recovery=true` explicitly permits guarded idle-holder eviction for that exact render | **yes** |
 | `list_360_loras` | Discover `path` + `base_model` for seeds | no |
 | `generate_seed` | Submit a 360-LoRA job with a caller-supplied UUID | **yes** |
 | `get_seed_job` | Read exact seed job progress, original-index results, and errors | no |
@@ -101,6 +102,12 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 8. **Save a variant** → `save_workflow` (`user`/`project`, **new** id). Create-only; 409 means pick another id.
 9. **Abort** → `cancel_run`.
 10. **Many local images, one frozen recipe** → `preflight_batch` → `get_batch_preflight` → `start_batch` (not `run_workflow`, not a Sequence). Poll `get_batch`. Abort with `cancel_batch`.
+
+### GPU diagnosis and retry
+
+Call `get_gpu_diagnostics` for the app's selected device and current status. The NVML card/process sample may be cached: read `accounting.nvml_sampled_at_unix_ms` and `nvml_sample_age_ms`; null means no valid NVML sample. Device use, per-process attribution, Torch/CuPy pools, and registered holder footprints overlap, so do not add them together or claim a workload will fit. WDDM can leave this-app attribution null; a holder's `busy_state=unknown` is not idle. Use a workload-specific estimator where available and keep its result advisory.
+
+`retry_run(run_id)` is an ordinary retry. If the user explicitly requests idle-holder recovery for that failed render, explain that `retry_run(run_id, vram_recovery=true)` may evict idle in-app GPU holders for that exact render, then obtain the host's mutation approval for those exact arguments. Tool arguments such as `approved:true` are never approval. Do not offer process killing or unload-all as a diagnosis action.
 
 ## Upres
 

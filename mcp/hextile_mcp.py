@@ -51,6 +51,7 @@ TOOL_NAMES = (
     "run_workflow",
     "validate_config",
     "get_status",
+    "get_gpu_diagnostics",
     "get_render_config",
     "get_logs",
     "list_runs",
@@ -95,6 +96,7 @@ _READ_ONLY = frozenset(
         "get_live_context",
         "validate_config",
         "get_status",
+        "get_gpu_diagnostics",
         "get_render_config",
         "get_logs",
         "list_runs",
@@ -420,6 +422,15 @@ TOOLS: list[dict[str, Any]] = [
         required=["run_id"],
     ),
     _tool_def(
+        "get_gpu_diagnostics",
+        "Read the app's current GPU/VRAM status without changing GPU state. "
+        "NVML card/process values may be cached; inspect sample time and age. "
+        "Device use, process attribution, allocator pools, and model footprints "
+        "overlap; unknown values stay unknown. This does not predict whether a "
+        "particular workload will fit.",
+        {},
+    ),
+    _tool_def(
         "get_render_config",
         "Read the producing .hextile.json for a render (GET /api/renders/{id}/config). Read-only.",
         {
@@ -464,9 +475,17 @@ TOOLS: list[dict[str, Any]] = [
     _tool_def(
         "retry_run",
         "Retry a crashed/failed render (POST /api/renders/{id}/retry). "
-        "APP returns 400 otherwise. Uses APP tile-reuse policy.",
+        "APP returns 400 otherwise. Uses APP tile-reuse policy. Optional "
+        "vram_recovery=true may evict idle in-app GPU holders for this exact "
+        "render; request and approve that effect explicitly. Omitted/false "
+        "is an ordinary retry.",
         {
             "run_id": {"type": "string", "description": "Render id to retry"},
+            "vram_recovery": {
+                "type": "boolean",
+                "description": "Explicitly allow guarded idle-holder eviction for this render only. Default false.",
+                "default": False,
+            },
         },
         required=["run_id"],
     ),
@@ -1006,7 +1025,7 @@ TOOLS: list[dict[str, Any]] = [
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
-assert len(TOOL_NAMES) == 43
+assert len(TOOL_NAMES) == 44
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
 assert _DESTRUCTIVE <= _MUTATING
 
@@ -1119,6 +1138,7 @@ class HextileMcpServer:
             "run_workflow": self._run_workflow,
             "validate_config": self._validate_config,
             "get_status": self._get_status,
+            "get_gpu_diagnostics": self._get_gpu_diagnostics,
             "get_render_config": self._get_render_config,
             "get_logs": self._get_logs,
             "list_runs": self._list_runs,
@@ -1586,6 +1606,9 @@ class HextileMcpServer:
             )
         return self.client.get_status(str(run_id))
 
+    def _get_gpu_diagnostics(self, args: dict[str, Any]) -> Any:
+        return self.client.get_gpu_diagnostics()
+
     def _get_render_config(self, args: dict[str, Any]) -> Any:
         render_id = args.get("render_id")
         if not render_id:
@@ -1621,7 +1644,7 @@ class HextileMcpServer:
             raise HextileClientError(
                 "run_id is required", status_code=None, kind="other"
             )
-        return self.client.retry_run(str(run_id))
+        return self.client.retry_run(str(run_id), vram_recovery=args.get("vram_recovery") is True)
 
     def _generate_seed(self, args: dict[str, Any]) -> Any:
         request_id = args.get("request_id")

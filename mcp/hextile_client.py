@@ -400,6 +400,10 @@ class Client:
 
     # ── renders ─────────────────────────────────────────────────────────
 
+    def get_gpu_diagnostics(self) -> Any:
+        """GET /api/processors/vram-status; the app owns GPU measurements."""
+        return self.get_json("/api/processors/vram-status")
+
     def get_status(self, run_id: str) -> Any:
         """GET /api/renders/{run_id}."""
         rid = urllib.parse.quote(run_id, safe="")
@@ -420,10 +424,13 @@ class Client:
         rid = urllib.parse.quote(run_id, safe="")
         return self.post_json(f"/api/renders/{rid}/stop")
 
-    def retry_run(self, run_id: str) -> Any:
-        """POST /api/renders/{run_id}/retry — APP tile-reuse on crashed/failed."""
+    def retry_run(self, run_id: str, *, vram_recovery: bool = False) -> Any:
+        """POST retry; request render-scoped idle-holder recovery only when true."""
         rid = urllib.parse.quote(run_id, safe="")
-        return self.post_json(f"/api/renders/{rid}/retry")
+        return self.post_json(
+            f"/api/renders/{rid}/retry",
+            {"vram_recovery": True} if vram_recovery else None,
+        )
 
     def list_runs(self, lifecycle_status: str = "active") -> Any:
         """GET /api/renders/?lifecycle_status= (default active)."""
