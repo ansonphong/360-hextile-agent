@@ -284,7 +284,12 @@ class Client:
                 isinstance(paths, list)
                 and len(paths) == expected_count
                 and all(
-                    isinstance(path, str) and path and Path(path).is_absolute()
+                    isinstance(path, str)
+                    and path
+                    and Path(path).is_absolute()
+                    and not path.endswith(("/", "\\"))
+                    and Path(path).suffix
+                    and not {".", ".."}.intersection(path.replace("\\", "/").split("/"))
                     for path in paths
                 )
                 and len(set(paths)) == expected_count

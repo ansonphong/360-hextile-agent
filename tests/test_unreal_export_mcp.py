@@ -301,6 +301,27 @@ def test_file_export_valid_six_face_receipt(tmp_path: Path) -> None:
     assert len(_export_requests(seen)) == 1
 
 
+@pytest.mark.parametrize("last_leaf", ["..", "sky_px.png", "unfinished"])
+def test_file_export_unusable_six_face_receipt_is_unknown(tmp_path: Path, last_leaf: str) -> None:
+    seen: dict[str, Any] = {}
+    folder = tmp_path.resolve() / "faces"
+    paths = [str(folder / f"sky_{face}.png") for face in ("px", "nx", "py", "ny", "pz")]
+    paths.append(str(folder / last_leaf))
+    if last_leaf == "..":
+        assert Path(paths[-1]).parent == folder  # Lexical parent alone is not containment.
+    receipt = {"outcome": "complete", "paths": paths}
+    args = _file_args(tmp_path) | {
+        "output_name": "faces", "projection": "cubemap_cross", "encoding": "png",
+        "layout": "six_faces", "source_revision": "rev", "output_fingerprint": "fingerprint",
+    }
+    result = HextileMcpServer(client=Client(base_url=BASE, opener=_recorder(seen, receipt))).call_tool(
+        "export_render_file", args
+    )
+    assert result["isError"]
+    assert "file_outcome_unknown" in json.dumps(result)
+    assert len(_export_requests(seen)) == 1
+
+
 def test_file_export_six_face_escape_is_unknown(tmp_path: Path) -> None:
     seen: dict[str, Any] = {}
     folder = tmp_path.resolve() / "faces"
