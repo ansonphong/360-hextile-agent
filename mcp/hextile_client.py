@@ -635,16 +635,30 @@ class Client:
         return self.get_json("/api/models/queue")
 
     def _model_mutation(self, path: str, body: Optional[Mapping[str, Any]] = None,
-                        *, params: Optional[Mapping[str, Any]] = None) -> Any:
+                        *, params: Optional[Mapping[str, Any]] = None,
+                        bundle: bool = False) -> Any:
         try:
-            return self.post_json(path, body, params=params)
+            result = self.post_json(path, body, params=params)
+            if (not isinstance(result, dict)
+                    or type(result.get("success")) is not bool
+                    or not isinstance(result.get("message"), str)
+                    or (bundle and (not isinstance(result.get("model_dispositions"), dict)
+                                    or not isinstance(result.get("failed_model_ids"), list)))):
+                raise HextileClientError(
+                    "Model queue action outcome unknown; read the download queue before any repeat.",
+                    kind="model_outcome_unknown",
+                )
+            return result
         except http.client.HTTPException as exc:
             raise HextileClientError(
                 "Model queue action outcome unknown; read the download queue before any repeat.",
                 body=str(exc), kind="model_outcome_unknown",
             ) from exc
         except HextileClientError as exc:
-            if exc.kind == "app_down":
+            if exc.kind == "app_down" or (
+                exc.kind == "other" and exc.status_code is not None
+                and 200 <= exc.status_code < 300
+            ):
                 raise HextileClientError(
                     "Model queue action outcome unknown; read the download queue before any repeat.",
                     body=exc.body, kind="model_outcome_unknown",
@@ -663,6 +677,7 @@ class Client:
             f"/api/models/queue/pipeline/{pid}",
             params={"selected_model_id": model_id,
                     "expected_selection_fingerprint": expected_selection_fingerprint},
+            bundle=True,
         )
 
     def repair_model(self, pipeline_id: str, model_id: str) -> Any:

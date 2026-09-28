@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import ast
+import http.client
 import importlib.util
 import io
 import json
@@ -313,8 +314,14 @@ def test_model_client_routes_and_unknown_outcome() -> None:
     class Response:
         status = 200
 
+        def __init__(self, bundle: bool = False) -> None:
+            self.bundle = bundle
+
         def read(self) -> bytes:
-            return b'{"ok":true}'
+            result: dict[str, Any] = {"success": True, "message": "Queued"}
+            if self.bundle:
+                result.update(model_dispositions={}, failed_model_ids=[])
+            return json.dumps(result).encode("utf-8")
 
         def __enter__(self) -> "Response":
             return self
@@ -324,7 +331,7 @@ def test_model_client_routes_and_unknown_outcome() -> None:
 
     def opener(req: Any, timeout: Any = None) -> Response:
         seen.append((req.get_method(), req.full_url, json.loads(req.data) if req.data else None))
-        return Response()
+        return Response("/queue/pipeline/" in req.full_url)
 
     client = Client(opener=opener)
     client.get_model_readiness([{"pipeline_id": "sdxl", "model_id": "base"}])
@@ -351,6 +358,116 @@ def test_model_client_routes_and_unknown_outcome() -> None:
         Client(opener=lost).repair_model("sdxl", "base")
     assert ei.value.kind == "model_outcome_unknown"
     assert "read the download queue" in str(ei.value)
+
+
+@pytest.mark.parametrize("raw", [b"", b"{", b'"ok"', b'{"success":true}'])
+def test_model_ambiguous_2xx_acknowledgement_is_unknown(raw: bytes) -> None:
+    calls = 0
+
+    class Response:
+        status = 200
+
+        def read(self) -> bytes:
+            return raw
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(_req: Any, timeout: Any = None) -> Response:
+        nonlocal calls
+        if not _req.full_url.endswith("/api/agent/events"):
+            calls += 1
+        return Response()
+
+    result = HextileMcpServer(client=Client(opener=opener)).call_tool(
+        "repair_model", {"pipeline_id": "sdxl", "model_id": "base"}
+    )
+    assert calls == 1
+    assert result["isError"] is True
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["kind"] == "model_outcome_unknown"
+    assert "read the download queue" in payload["error"]
+
+
+def test_model_truncated_2xx_acknowledgement_is_unknown() -> None:
+    class Response:
+        status = 200
+
+        def read(self) -> bytes:
+            raise http.client.IncompleteRead(b'{"success":true', 3)
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    result = HextileMcpServer(client=Client(opener=lambda *_args, **_kwargs: Response())).call_tool(
+        "install_model", {"pipeline_id": "sdxl", "model_id": "base", "bundle": False}
+    )
+    assert result["isError"] is True
+    assert json.loads(result["content"][0]["text"])["kind"] == "model_outcome_unknown"
+
+
+def test_model_action_rejection_retains_app_details_and_success_stays_success() -> None:
+    queue_status = {"queued": [{"pipeline_id": "sdxl", "model_id": "base",
+                                "queue_entry_id": "entry"}]}
+    single_reject = {"success": False, "message": "Cannot queue", "queue_status": queue_status}
+    partial_bundle = {
+        "success": False, "message": "Added 1 required models to queue (1 rejected)",
+        "queue_status": queue_status,
+        "model_dispositions": {
+            "base": {"disposition": "newly_queued", "reason": None},
+            "refiner": {"disposition": "rejected", "reason": "Not enough disk"},
+        },
+        "failed_model_ids": ["refiner"],
+    }
+    admitted = {"success": True, "message": "Queued", "queue_status": queue_status}
+    responses = [single_reject, partial_bundle, admitted]
+
+    class Response:
+        status = 200
+
+        def __init__(self, data: dict[str, Any]) -> None:
+            self.data = data
+
+        def read(self) -> bytes:
+            return json.dumps(self.data).encode("utf-8")
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        if req.full_url.endswith("/api/agent/events"):
+            return Response({"ok": True})
+        if req.full_url.endswith("/selection-catalog"):
+            return Response({"models": [{"pipeline_id": "sdxl", "id": "base",
+                                        "selection_fingerprint": "fp"}]})
+        return Response(responses.pop(0))
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    single = server.call_tool("install_model", {
+        "pipeline_id": "sdxl", "model_id": "base", "bundle": False,
+    })
+    bundle = server.call_tool("install_model", {
+        "pipeline_id": "sdxl", "model_id": "base", "bundle": True,
+        "expected_selection_fingerprint": "fp",
+    })
+    success = server.call_tool("repair_model", {"pipeline_id": "sdxl", "model_id": "base"})
+
+    assert single["isError"] is True
+    assert json.loads(single["content"][0]["text"]) == single_reject
+    assert bundle["isError"] is True
+    assert json.loads(bundle["content"][0]["text"]) == partial_bundle
+    assert success["isError"] is False
+    assert json.loads(success["content"][0]["text"]) == admitted
+    assert responses == []
 
 
 def test_model_handlers_require_current_preconditions_and_exact_target() -> None:

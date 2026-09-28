@@ -1448,6 +1448,14 @@ class HextileMcpServer:
             header_context = bind_headers(private_headers) if bind_headers else nullcontext()
             with header_context:
                 data = handler(args)
+            if name in {"install_model", "repair_model", "cancel_model_download"} and isinstance(data, dict) and data.get("success") is False:
+                self._emit_activity(
+                    tool=name, call_id=call_id, phase="failed",
+                    error={"kind": "model_rejected", "status_code": None,
+                           "message": str(data.get("message", "Model action rejected"))},
+                    seed=_seed_activity(name, args), overrides_keys=overrides_keys,
+                )
+                return _err_result(data)
             phase = (
                 "cancelled"
                 if name in (
