@@ -365,7 +365,7 @@ class Client:
                 "Inspect local job activity before requesting a newly approved action.",
                 kind="layer_outcome_unknown",
                 receipt={"state": "unknown", "non_replayable": True, "render_id": render_id,
-                         "parent_job_id": job_id, "rgb_draft": body.get("rgb_draft")},
+                         "parent_job_id": job_id},
             ) from exc
 
     def land_generated_layer(self, render_id: str, body: Mapping[str, Any]) -> Any:
@@ -434,7 +434,18 @@ class Client:
         if not self.internal_mode or not headers.get("X-Hextile-Copilot-Token") or not headers.get("X-Hextile-Op"):
             raise HextileClientError("Live creative actions require an approved internal Copilot turn.",
                                      status_code=403, kind="http")
-        return self.post_json("/api/agent/creative-live", {"tool_name": tool_name, "arguments": dict(arguments)})
+        try:
+            return self.post_json("/api/agent/creative-live", {"tool_name": tool_name, "arguments": dict(arguments)})
+        except (HextileClientError, http.client.HTTPException) as exc:
+            if tool_name != "rematte_layer" or not _layer_transport_unknown(exc):
+                raise
+            raise HextileClientError(
+                "Re-matte outcome unknown and non-replayable: the server chooses its job id. "
+                "Inspect local job activity before requesting a newly approved action.",
+                kind="layer_outcome_unknown",
+                receipt={"state": "unknown", "non_replayable": True,
+                         "render_id": arguments.get("render_id"), "parent_job_id": arguments.get("job_id")},
+            ) from exc
 
     # ── saved Spot Clone ────────────────────────────────────────────────
 

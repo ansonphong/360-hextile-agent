@@ -104,8 +104,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_layer_draft` | Inspect exact saved HEAD, draft, revision, active layer source pairs and take fingerprints | no |
 | `generate_layer` | Start one Generate Layer job on a saved render with stable request_id; no automatic land/commit | **yes** |
 | `get_layer_generation` | Poll an exact layer job, including ready or released terminal state | no |
-| `cancel_layer_generation` | Request cancellation of one exact layer job; poll until released | **yes** |
-| `rematte_layer` | Re-matte or Keep rectangle from a retained RGB token; uncertain acknowledgement is non-replayable | **yes** |
+| `cancel_layer_generation` | Request cancellation of one exact layer job; optional `execution_target` defaults to saved; poll until released | **yes** |
+| `rematte_layer` | Re-matte or Keep rectangle from a retained RGB token; optional `execution_target` defaults to saved, while `target` selects the recovery take; uncertain acknowledgement is non-replayable | **yes** |
 | `land_generated_layer` | Land one exact ready pair into the witnessed v6 draft; no graph commit | **yes** |
 | `commit_layer_draft` | Explicitly bake the witnessed draft onto HEAD as a final Layers node | **yes** |
 | `preflight_spot_clone` | Inspect exact saved parent/HEAD and available shape, template, or render-local raster fingerprints | no |
@@ -141,7 +141,7 @@ For `install_model(bundle=true)`, use the selected primary's current default-cat
 
 Get approval for each mutation and keep the exact render, HEAD, draft, composition and revision from `get_layer_draft`. Use `generate_layer(target=saved, mode=generate, request_id=<32 lowercase hex>, ...)`, then poll `get_layer_generation` by that same id until `ready`. Ready is only an artifact; call `land_generated_layer(target=saved, layer_id=<stable pl_ id>, ...)` to insert one atom, then explicitly call `commit_layer_draft(target=saved, ...)` with the fresh revision if a graph node is wanted. Generation does not land, and land does not commit. An open studio-owned draft refuses saved mutation; MCP does not arm or retarget the viewer.
 
-For Re-gen or variation, inspect the active layer's exact bare `asset`, `recipeSource` and `takes_fingerprint`; Re-gen preserves pose and permits at most eight takes. The draft permits at most 64 layers. `rematte_layer` uses the retained `rgb_draft.token` and a server-minted job id; a lost reply is unknown and must not be replayed. If start, land, or commit loses its reply, reconcile by the original request/job/layer/draft ids and exact saved state before any newly approved attempt. A missing RAM job after restart remains unknown, not a reason to invent a new id. `cancel_layer_generation` requests stop; poll for terminal `released` before claiming the GPU job ended. External MCP `target=live` returns 403; only the private, approved Copilot path may operate an already armed Layers session.
+For Re-gen or variation, inspect the active layer's exact bare `asset`, `recipeSource` and `takes_fingerprint`; Re-gen preserves pose and permits at most eight takes. The draft permits at most 64 layers. `rematte_layer` uses the retained `rgb_draft.token` and a server-minted job id; a lost reply is unknown and must not be replayed. If start, land, or commit loses its reply, reconcile by the original request/job/layer/draft ids and exact saved state before any newly approved attempt. A missing RAM job after restart remains unknown, not a reason to invent a new id. `cancel_layer_generation` requests stop; poll for terminal `released` before claiming the GPU job ended. Both job controls default to saved; `execution_target=live` is only for an approved internal Copilot child on the matching armed job, never external MCP. Re-matte's separate `target` remains the witnessed take to replace. External MCP live requests return 403.
 
 ### Spot Clone on a saved render
 

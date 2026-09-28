@@ -1417,17 +1417,22 @@ TOOLS: list[dict[str, Any]] = [
     _tool_def(
         "cancel_layer_generation",
         "Request cancellation of one exact Generate Layer job. The acknowledgement is not GPU release; "
-        "read get_layer_generation until terminal and released.",
-        {"render_id": {"type": "string"}, "job_id": _LAYER_JOB_ID},
+        "read get_layer_generation until terminal and released. execution_target defaults to saved; "
+        "live requires an approved internal Copilot turn.",
+        {"render_id": {"type": "string"}, "job_id": _LAYER_JOB_ID,
+         "execution_target": _LAYER_TARGET},
         required=["render_id", "job_id"],
     ),
     _tool_def(
         "rematte_layer",
         "Re-matte an exact retained RGB token, or Keep rectangle with alpha.mode=opaque. "
-        "One call only: the server mints the new job id, so transport loss is unknown and non-replayable.",
+        "execution_target defaults to saved; live requires an approved internal Copilot turn. "
+        "target selects the recovery take, not saved/live execution. One call only: the server mints "
+        "the new job id, so transport loss is unknown and non-replayable.",
         {"render_id": {"type": "string"}, "job_id": _LAYER_JOB_ID,
          "rgb_draft": {"type": "string", "minLength": 8, "maxLength": 200},
-         "alpha": _LAYER_ALPHA, "target": _LAYER_RECOVERY_TARGET},
+         "alpha": _LAYER_ALPHA, "target": _LAYER_RECOVERY_TARGET,
+         "execution_target": _LAYER_TARGET},
         required=["render_id", "job_id", "rgb_draft", "alpha"],
     ),
     _tool_def(
@@ -2175,12 +2180,24 @@ class HextileMcpServer:
                                      status_code=409, kind="http")
 
     def _cancel_layer_generation(self, args: dict[str, Any]) -> Any:
+        execution_target = args.get("execution_target", "saved")
+        if execution_target == "live":
+            return _layer_receipt("cancel_layer_generation", self.client.creative_live(
+                "cancel_layer_generation", args
+            ))
+        if execution_target != "saved":
+            raise HextileClientError("execution_target must be saved or live", kind="other")
         self._saved_layer_job(args)
         return _layer_receipt("cancel_layer_generation", self.client.cancel_layer_generation(
             str(args["render_id"]), str(args["job_id"])
         ))
 
     def _rematte_layer(self, args: dict[str, Any]) -> Any:
+        execution_target = args.get("execution_target", "saved")
+        if execution_target == "live":
+            return _layer_receipt("rematte_layer", self.client.creative_live("rematte_layer", args))
+        if execution_target != "saved":
+            raise HextileClientError("execution_target must be saved or live", kind="other")
         self._saved_layer_job(args)
         body = {"version": 1, "rgb_draft": args["rgb_draft"], "alpha": args["alpha"]}
         if "target" in args:

@@ -57,6 +57,11 @@ def test_seven_closed_tools_and_policy() -> None:
     assert controls["additionalProperties"] is False
     assert controls["properties"]["diffusion"]["additionalProperties"] is False
     assert catalog["land_generated_layer"]["inputSchema"]["properties"]["pose"]["additionalProperties"] is False
+    for name in ("cancel_layer_generation", "rematte_layer"):
+        schema = catalog[name]["inputSchema"]
+        assert schema["properties"]["execution_target"]["enum"] == ["saved", "live"]
+        assert "execution_target" not in schema["required"]
+    assert "target" in catalog["rematte_layer"]["inputSchema"]["properties"]
 
 
 @pytest.mark.parametrize("name", ["generate_layer", "land_generated_layer", "commit_layer_draft"])
@@ -144,6 +149,39 @@ def test_external_live_refused_without_http_and_private_live_wire() -> None:
     assert request.get_header("X-hextile-op") == "approved-op"
 
 
+@pytest.mark.parametrize("name,args", [
+    ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB, "execution_target": "live"}),
+    ("rematte_layer", {"render_id": "r1", "job_id": JOB, "execution_target": "live",
+                       "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"},
+                       "target": {"layer_id": "pl_enamel1", "asset": "take.png",
+                                  "recipeSource": "take.hextile.json", "takes_fingerprint": "fp"}}),
+])
+def test_live_job_control_is_private_and_preserves_recovery_target(name: str, args: dict[str, Any]) -> None:
+    calls: list[Any] = []
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        calls.append(req)
+        return Response({"job_id": JOB, "state": "cancel_requested"})
+
+    external = HextileMcpServer(client=Client(opener=opener))
+    refused = external.call_tool(name, args)
+    assert refused["isError"] is True and payload(refused)["status_code"] == 403
+    assert not [req for req in calls if req.full_url.endswith("/creative-live") or "/api/renders/" in req.full_url]
+
+    internal = HextileMcpServer(client=Client(opener=opener, internal_mode=True), child_token="child-secret")
+    assert internal.call_tool(name, args)["isError"] is True  # No approved operation id.
+    assert not [req for req in calls if req.full_url.endswith("/creative-live") or "/api/renders/" in req.full_url]
+    result = internal.call_tool(name, args, operation_id="approved-op")
+    assert result["isError"] is False
+    effects = [req for req in calls if req.full_url.endswith("/creative-live")]
+    assert len(effects) == 1
+    request = effects[0]
+    assert request.full_url.endswith("/api/agent/creative-live")
+    assert json.loads(request.data) == {"tool_name": name, "arguments": args}
+    assert request.get_header("X-hextile-copilot-token") == "child-secret"
+    assert request.get_header("X-hextile-op") == "approved-op"
+
+
 def test_uncertain_rematte_is_one_call_and_non_replayable() -> None:
     attempts: list[str] = []
 
@@ -164,8 +202,27 @@ def test_uncertain_rematte_is_one_call_and_non_replayable() -> None:
     error = payload(result)
     assert error["kind"] == "layer_outcome_unknown"
     assert error["receipt"] == {"state": "unknown", "non_replayable": True,
-                                "render_id": "r1", "parent_job_id": JOB, "rgb_draft": "rgb-token"}
+                                "render_id": "r1", "parent_job_id": JOB}
     assert len([url for url in attempts if url.endswith("/agent-rematte")]) == 1
+
+
+def test_uncertain_live_rematte_is_one_call_and_non_replayable() -> None:
+    attempts: list[str] = []
+
+    def unavailable(req: Any, timeout: Any = None) -> Response:
+        attempts.append(req.full_url)
+        raise urllib.error.URLError("connection dropped after submit")
+
+    server = HextileMcpServer(client=Client(opener=unavailable, internal_mode=True), child_token="test")
+    result = server.call_tool("rematte_layer", {"execution_target": "live", "render_id": "r1",
+                                                "job_id": JOB, "rgb_draft": "rgb-token",
+                                                "alpha": {"mode": "opaque"}}, operation_id="approved-op")
+    assert result["isError"] is True
+    error = payload(result)
+    assert error["kind"] == "layer_outcome_unknown"
+    assert error["receipt"] == {"state": "unknown", "non_replayable": True,
+                                "render_id": "r1", "parent_job_id": JOB}
+    assert len(attempts) == 1 and attempts[0].endswith("/api/agent/creative-live")
 
 
 @pytest.mark.parametrize("name,arguments,stable_key", [
@@ -281,8 +338,13 @@ def test_studio_owned_saved_job_refuses_before_mutating_post(name: str, argument
 
 @pytest.mark.parametrize("name,args,route", [
     ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB}, "agent-cancel"),
+    ("cancel_layer_generation", {"render_id": "r1", "job_id": JOB, "execution_target": "saved"}, "agent-cancel"),
     ("rematte_layer", {"render_id": "r1", "job_id": JOB,
                        "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}}, "agent-rematte"),
+    ("rematte_layer", {"render_id": "r1", "job_id": JOB, "execution_target": "saved",
+                       "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"},
+                       "target": {"layer_id": "pl_enamel1", "asset": "take.png",
+                                  "recipeSource": "take.hextile.json", "takes_fingerprint": "fp"}}, "agent-rematte"),
 ])
 def test_saved_job_controls_use_agent_only_routes(name: str, args: dict[str, Any], route: str) -> None:
     posts: list[tuple[str, Any]] = []
@@ -303,7 +365,10 @@ def test_saved_job_controls_use_agent_only_routes(name: str, args: dict[str, Any
     assert result["isError"] is False
     assert len(posts) == 1 and posts[0][0].endswith("/" + route)
     if name == "rematte_layer":
-        assert posts[0][1] == {"version": 1, "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}}
+        expected = {"version": 1, "rgb_draft": "rgb-token", "alpha": {"mode": "opaque"}}
+        if "target" in args:
+            expected["target"] = args["target"]
+        assert posts[0][1] == expected
 
 
 def test_layer_http_error_keeps_code_but_omits_backend_path() -> None:
