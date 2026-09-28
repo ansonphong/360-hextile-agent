@@ -89,6 +89,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_unreal_export_catalog` | Read the Unreal export catalog (empty is valid) | no |
 | `preflight_unreal_export` | Advisory Unreal-project preflight (same body as the Export modal) | no |
 | `export_to_unreal_project` | Export HDR (+ optional masters) into a paired Unreal project. Requires APP Unreal-project sink and actual M1 state. 300s, one attempt | **yes** |
+| `preflight_file_export` | Check exact source revision and proposed ordinary file destinations before export | no |
+| `export_render_file` | Export an ordinary render file after preflight and approval; create-only, 300s, one attempt | **yes** |
 
 ### Selection guide
 

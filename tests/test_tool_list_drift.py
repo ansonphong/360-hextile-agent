@@ -99,13 +99,15 @@ EXPECTED_TOOLS = (
     "get_unreal_export_catalog",
     "preflight_unreal_export",
     "export_to_unreal_project",
+    "preflight_file_export",
+    "export_render_file",
 )
 
 
 def test_tool_names_match_surface() -> None:
     assert tuple(TOOL_NAMES) == EXPECTED_TOOLS
     assert len(TOOLS) == len(EXPECTED_TOOLS)
-    assert len(EXPECTED_TOOLS) == 44
+    assert len(EXPECTED_TOOLS) == 46
     assert {t["name"] for t in TOOLS} == set(EXPECTED_TOOLS)
     assert _BATCH_TOOLS <= set(EXPECTED_TOOLS)
     assert len(_BATCH_TOOLS) == 11
@@ -147,6 +149,8 @@ def test_open4_annotations_partition() -> None:
     assert "get_unreal_export_catalog" in _READ_ONLY
     assert "preflight_unreal_export" in _READ_ONLY
     assert "export_to_unreal_project" in _MUTATING
+    assert "preflight_file_export" in _READ_ONLY
+    assert "export_render_file" in _MUTATING
     assert "get_gpu_diagnostics" in _READ_ONLY
     assert "retry_run" in _MUTATING
 
@@ -177,7 +181,7 @@ def test_app_tool_names_ast_equals() -> None:
     assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
     app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
     assert set(TOOL_NAMES) == app_names
-    assert len(app_names) == 44
+    assert len(app_names) == 46
 
 
 def test_gpu_diagnostics_and_retry_client_routes() -> None:
