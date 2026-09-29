@@ -147,6 +147,25 @@ For Re-gen or variation, inspect the active layer's exact bare `asset`, `recipeS
 
 Read `preflight_spot_clone(render_id,parent_id)` and require its exact HEAD and final parent before asking for approval to write. Choose an explicit destination label and source/destination poses; the agent never selects them in the viewer. A shape mask has no fingerprint; a template or raster selector must carry the matching SHA-256 from preflight. `clone_spot(target=saved,...)` uses one stable 12-lowercase-hex `node_id`, no force or path/pixel upload. Read `get_spot_clone` by that same id after a lost response. A missing receipt remains unknown; never mint a new id or claim the graph write was cancelled. Stop prevents new calls but cannot undo an accepted graph node; use normal graph history/Undo for a completed node. External `target=live` is forbidden.
 
+### Device-local Hotkeys
+
+`list_hotkeys` reads the current profile, revision, effective bindings and availability;
+`inspect_hotkey` explains one action and optional candidate bindings, conflicts and overlaps.
+The app must be open; MCP Follow and a render document are not required.
+Bindings use `meta_key` for the Meta modifier and `slash` for the slash key.
+
+Read before every edit and approve the exact action, bindings and returned `revision`.
+`set_hotkey_bindings` replaces the complete alias list (`[]` unbinds),
+`remove_hotkey_binding` removes one assigned chord, `restore_hotkey` restores one
+customized row, and `reset_hotkeys` clears all overrides including inert unknown IDs.
+Reset leaves the separate single-key switch unchanged. Conflicts never silently
+reassign another action. A stale revision requires a fresh read and new approval.
+Only an explicit reset can replace a future-format profile.
+
+If a write returns `hotkeys_outcome_unknown`, its effect is uncertain. Never replay
+it automatically: re-read the profile, inspect the actual bindings, and obtain a
+new approval only if another mutation is still needed.
+
 ## Upres
 
 GPU upres of a still, a folder, or a video → skill `/hextile-upres`. Do not invent `upscale_image`. Do not send GPU upres through `hextile-pipe`.

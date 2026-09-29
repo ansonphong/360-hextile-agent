@@ -154,7 +154,9 @@ class Client:
         except urllib.error.HTTPError as exc:
             snippet = ""
             try:
-                snippet = (exc.read() or b"")[:_ERROR_BODY_SNIPPET].decode(
+                # Hotkeys has bounded structured conflict details, not a log snippet.
+                limit = 64 * 1024 if path == "/api/agent/hotkeys/requests" else _ERROR_BODY_SNIPPET
+                snippet = (exc.read(limit) or b"").decode(
                     "utf-8", "replace"
                 )
             except Exception:
@@ -202,6 +204,48 @@ class Client:
                 body=str(exc),
                 kind="app_down",
             ) from exc
+
+    def hotkeys_request(self, op: str, args: Mapping[str, Any]) -> Any:
+        """Proxy the frontend-owned profile once; never replay an uncertain write."""
+        mutating = op not in {"list", "inspect"}
+        unknown_message = "Hotkeys outcome unknown; read the profile before approving another mutation."
+        try:
+            result = self.request_json(
+                "POST", "/api/agent/hotkeys/requests", {"op": op, "args": dict(args)},
+                timeout=30.0,
+                headers=None if self.internal_mode else {"X-Hextile-Agent": "mcp"},
+            )
+            if not isinstance(result, dict) or result.get("ok") is not True or not isinstance(result.get("data"), dict):
+                raise HextileClientError("Invalid Hotkeys acknowledgement", kind="other", status_code=200)
+            return result["data"]
+        except http.client.HTTPException as exc:
+            raise HextileClientError(
+                unknown_message if mutating else APP_DOWN_MSG,
+                kind="hotkeys_outcome_unknown" if mutating else "app_down",
+            ) from exc
+        except HextileClientError as exc:
+            try:
+                detail = json.loads(exc.body or "{}").get("detail", {})
+            except (ValueError, AttributeError):
+                detail = {}
+            if not isinstance(detail, dict):
+                detail = {}
+            code = detail.get("code")
+            malformed_success = exc.kind == "other" and exc.status_code is not None and 200 <= exc.status_code < 300
+            if mutating and (code == "outcome_unknown" or exc.kind == "app_down" or malformed_success):
+                raise HextileClientError(unknown_message, kind="hotkeys_outcome_unknown", status_code=exc.status_code) from exc
+            if isinstance(code, str):
+                recovery = {
+                    "stale_revision": "Read the profile again before proposing a new edit.",
+                    "hotkey_conflict": "Inspect conflicts and resolve each action explicitly.",
+                    "hotkeys_app_unavailable": "Open the app and read the profile again.",
+                    "unsupported_hotkey_profile": "Only an explicitly approved reset can replace a future profile.",
+                }.get(code, "Read or inspect Hotkeys before another edit.")
+                raise HextileClientError(
+                    f"{code}: {recovery}", status_code=exc.status_code, kind=exc.kind,
+                    receipt={key: detail[key] for key in ("code", "conflicts", "request_id") if key in detail},
+                ) from exc
+            raise
 
     def get_json(
         self,

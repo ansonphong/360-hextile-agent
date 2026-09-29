@@ -166,6 +166,25 @@ Call `preflight_file_export` with an exact `render_id`, `source_node_id`, select
 
 `describe_image` accepts `source: {"kind":"render_node","render_id":"...","node_id":"..."}` or `source: {"kind":"local_file","path":"/absolute/image.png"}`. Optionally add `crop: {"yaw":15,"pitch":-10,"fov":70}` for a 2:1 equirectangular panorama. The app resolves the exact source and runs local vision; the MCP proxy never opens the image. Approve the local compute/GPU call before invoking it. The result is text (`prompt`, source identity, mode, crop and image signature), never raster data. URLs, base64 and implicit current-selection sources are not accepted.
 
+### Device-local Hotkeys
+
+`list_hotkeys` reads the current profile, revision, effective bindings and availability;
+`inspect_hotkey` explains one action and optional candidate bindings, conflicts and overlaps.
+The app must be open; MCP Follow and a render document are not required.
+Bindings use `meta_key` for the Meta modifier and `slash` for the slash key.
+
+Read before every edit and approve the exact action, bindings and returned `revision`.
+`set_hotkey_bindings` replaces the complete alias list (`[]` unbinds),
+`remove_hotkey_binding` removes one assigned chord, `restore_hotkey` restores one
+customized row, and `reset_hotkeys` clears all overrides including inert unknown IDs.
+Reset leaves the separate single-key switch unchanged. Conflicts never silently
+reassign another action. A stale revision requires a fresh read and new approval.
+Only an explicit reset can replace a future-format profile.
+
+If a write returns `hotkeys_outcome_unknown`, its effect is uncertain. Never replay
+it automatically: re-read the profile, inspect the actual bindings, and obtain a
+new approval only if another mutation is still needed.
+
 ## App not running
 
 Every tool returns a structured error, roughly:

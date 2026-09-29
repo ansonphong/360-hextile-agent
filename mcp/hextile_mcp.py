@@ -108,11 +108,19 @@ TOOL_NAMES = (
     "preflight_spot_clone",
     "clone_spot",
     "get_spot_clone",
+    "list_hotkeys",
+    "inspect_hotkey",
+    "set_hotkey_bindings",
+    "remove_hotkey_binding",
+    "restore_hotkey",
+    "reset_hotkeys",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
 _READ_ONLY = frozenset(
     {
+        "list_hotkeys",
+        "inspect_hotkey",
         "list_workflows",
         "get_workflow",
         "get_capabilities",
@@ -150,6 +158,11 @@ _READ_ONLY = frozenset(
 )
 _MUTATING = frozenset(
     {
+        "set_hotkey_bindings",
+        "remove_hotkey_binding",
+        "restore_hotkey",
+        "reset_hotkeys",
+
         "apply_config_delta",
         "save_workflow",
         "delete_workflow",
@@ -200,6 +213,8 @@ _BATCH_TOOLS = frozenset(
 )
 _DESTRUCTIVE = frozenset(
     {
+        "remove_hotkey_binding",
+        "reset_hotkeys",
         "cancel_run",
         "cancel_seed",
         "delete_workflow",
@@ -230,6 +245,11 @@ _LAYER_TOOLS = frozenset({
     "get_layer_draft", "generate_layer", "get_layer_generation", "cancel_layer_generation",
     "rematte_layer", "land_generated_layer", "commit_layer_draft",
 })
+_HOTKEY_OPS = dict(zip(
+    ("list_hotkeys", "inspect_hotkey", "set_hotkey_bindings",
+     "remove_hotkey_binding", "restore_hotkey", "reset_hotkeys"),
+    ("list", "inspect", "set", "remove", "restore", "reset"),
+))
 _SPOT_CLONE_TOOLS = frozenset({"preflight_spot_clone", "clone_spot", "get_spot_clone"})
 _PRIVATE_ARGUMENT_KEYS = frozenset(
     {
@@ -453,7 +473,33 @@ _CLONE_MASK = {
 }
 
 
+_HOTKEY_BINDING = {
+    "type": "object", "additionalProperties": False, "required": ["key"],
+    "properties": {
+        "key": {"type": "string", "minLength": 1, "maxLength": 32,
+                "description": "Normalized key; encode the slash key as slash."},
+        "ctrl": {"type": "boolean"}, "meta_key": {"type": "boolean"},
+        "alt": {"type": "boolean"}, "shift": {"type": "boolean"},
+    },
+}
+_HOTKEY_BINDINGS = {"type": "array", "items": _HOTKEY_BINDING, "maxItems": 8}
+_HOTKEY_ID = {"type": "string", "minLength": 1, "maxLength": 128}
+_HOTKEY_REVISION = {"type": "string", "minLength": 1, "maxLength": 128,
+                    "description": "Exact revision returned by the latest Hotkeys read."}
+
+
 TOOLS: list[dict[str, Any]] = [
+    _tool_def("list_hotkeys", "Read this app's device-local Hotkeys profile, revision, effective bindings and availability. Requires the app; no Follow or render document needed.", {}),
+    _tool_def("inspect_hotkey", "Inspect one Hotkey and optional candidate bindings for edit errors, conflicts and explained overlaps at the current revision.",
+              {"id": _HOTKEY_ID, "bindings": _HOTKEY_BINDINGS}, ["id"]),
+    _tool_def("set_hotkey_bindings", "Replace one complete Hotkey alias list; an empty list unbinds it. Read first and obtain approval for the exact bindings and revision. Conflicts never reassign other actions.",
+              {"id": _HOTKEY_ID, "bindings": _HOTKEY_BINDINGS, "revision": _HOTKEY_REVISION}, ["id", "bindings", "revision"]),
+    _tool_def("remove_hotkey_binding", "Remove exactly one assigned Hotkey chord using the revision from a fresh read.",
+              {"id": _HOTKEY_ID, "binding": _HOTKEY_BINDING, "revision": _HOTKEY_REVISION}, ["id", "binding", "revision"]),
+    _tool_def("restore_hotkey", "Restore one customized Hotkey to its factory bindings using the revision from a fresh read.",
+              {"id": _HOTKEY_ID, "revision": _HOTKEY_REVISION}, ["id", "revision"]),
+    _tool_def("reset_hotkeys", "Clear all Hotkey binding overrides, including inert unknown IDs. Leaves the separate single-key switch unchanged. Explicit approval and a fresh revision required.",
+              {"revision": _HOTKEY_REVISION}, ["revision"]),
     _tool_def(
         "list_workflows",
         "List workflow templates on all shelves (builtin / user / project). "
@@ -1730,6 +1776,10 @@ class HextileMcpServer:
             "clone_spot": self._clone_spot,
             "get_spot_clone": self._get_spot_clone,
         }
+        self._handlers.update({
+            name: (lambda args, op=op: self.client.hotkeys_request(op, args))
+            for name, op in _HOTKEY_OPS.items()
+        })
 
     def handle_rpc(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Handle one JSON-RPC message. Returns response or None for notifications."""
@@ -1866,7 +1916,7 @@ class HextileMcpServer:
                 else "succeeded"
             )
             # Batch and seed IDs must never enter run.run_id (Render consumers).
-            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") or name in _LAYER_TOOLS or name in _SPOT_CLONE_TOOLS else _run_from_payload(data)
+            run = None if name in _BATCH_TOOLS or name in ("generate_seed", "get_seed_job", "cancel_seed") or name in _LAYER_TOOLS or name in _SPOT_CLONE_TOOLS or name in _HOTKEY_OPS else _run_from_payload(data)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
@@ -1878,6 +1928,9 @@ class HextileMcpServer:
             return _ok_result(data)
         except HextileClientError as exc:
             safe_error = _layer_error_payload(exc) if name in _LAYER_TOOLS else error_payload(exc)
+            if name in _HOTKEY_OPS and exc.receipt is not None:
+                safe_error.pop("receipt", None)
+                safe_error.update(exc.receipt)
             self._emit_activity(
                 tool=name,
                 call_id=call_id,
