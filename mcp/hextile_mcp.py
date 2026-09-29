@@ -489,7 +489,9 @@ _HOTKEY_REVISION = {"type": "string", "minLength": 1, "maxLength": 128,
 
 
 TOOLS: list[dict[str, Any]] = [
-    _tool_def("list_hotkeys", "Read this app's device-local Hotkeys profile, revision, effective bindings and availability. Requires the app; no Follow or render document needed.", {}),
+    _tool_def("list_hotkeys", "Read this app's device-local Hotkeys profile, revision, effective bindings and availability in pages of 20 actions. Start with no cursor; pass next_cursor unchanged until null. On stale_revision restart with no cursor. Requires the app; no Follow or render document needed.",
+              {"cursor": {"type": "string", "minLength": 1, "maxLength": 128,
+                          "description": "Opaque next_cursor from the previous page at the same profile revision."}}),
     _tool_def("inspect_hotkey", "Inspect one Hotkey and optional candidate bindings for edit errors, conflicts and explained overlaps at the current revision.",
               {"id": _HOTKEY_ID, "bindings": _HOTKEY_BINDINGS}, ["id"]),
     _tool_def("set_hotkey_bindings", "Replace one complete Hotkey alias list; an empty list unbinds it. Read first and obtain approval for the exact bindings and revision. Conflicts never reassign other actions.",

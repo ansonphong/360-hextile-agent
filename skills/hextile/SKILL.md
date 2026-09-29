@@ -154,6 +154,11 @@ Read `preflight_spot_clone(render_id,parent_id)` and require its exact HEAD and 
 The app must be open; MCP Follow and a render document are not required.
 Bindings use `meta_key` for the Meta modifier and `slash` for the slash key.
 
+Start `list_hotkeys` with `{}`. Each page contains at most 20 actions plus `total`
+and `next_cursor`; pass that cursor unchanged on the next call until it is null.
+Pages share one profile revision. If continuation returns `stale_revision`,
+discard the partial listing and restart without a cursor.
+
 Read before every edit and approve the exact action, bindings and returned `revision`.
 `set_hotkey_bindings` replaces the complete alias list (`[]` unbinds),
 `remove_hotkey_binding` removes one assigned chord, `restore_hotkey` restores one

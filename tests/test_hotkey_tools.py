@@ -120,3 +120,22 @@ def test_conflict_details_and_stable_code_survive_without_raw_body():
     assert result["code"] == "hotkey_conflict"
     assert result["conflicts"] == conflicts
     assert "body" not in result
+
+
+def test_list_continuation_schema_and_opaque_cursor_round_trip():
+    schema = next(row["inputSchema"] for row in TOOLS if row["name"] == "list_hotkeys")
+    assert not schema.get("required")
+    assert schema["properties"]["cursor"]["type"] == "string"
+    assert schema["properties"]["cursor"]["maxLength"] == 128
+    assert schema["additionalProperties"] is False
+    seen = []
+    page = {"revision": "rev-one", "actions": [], "total": 109, "next_cursor": "rev-one:40"}
+
+    def opener(req, timeout=None):
+        if req.full_url.endswith("/api/agent/hotkeys/requests"):
+            seen.append(json.loads(req.data))
+        return Response({"ok": True, "data": page})
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    assert payload(server.call_tool("list_hotkeys", {"cursor": "rev-one:20"})) == page
+    assert seen == [{"op": "list", "args": {"cursor": "rev-one:20"}}]
