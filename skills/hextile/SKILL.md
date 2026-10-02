@@ -111,6 +111,14 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `preflight_spot_clone` | Inspect exact saved parent/HEAD and available shape, template, or render-local raster fingerprints | no |
 | `clone_spot` | Explicit saved clone with stable node id and mask witness; live only through approved prepared Copilot operation | **yes** |
 | `get_spot_clone` | Read one exact graph node/digest receipt after an uncertain clone result | no |
+| `list_hotkeys` | Read this app's device-local Hotkey profile, revision, and effective bindings | no |
+| `inspect_hotkey` | Inspect one Hotkey and optional candidate bindings | no |
+| `set_hotkey_bindings` | Replace one complete Hotkey alias list after a fresh read | **yes** |
+| `remove_hotkey_binding` | Remove one assigned Hotkey chord | **yes** |
+| `restore_hotkey` | Restore one Hotkey to its factory bindings | **yes** |
+| `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
+| `get_shader_context` | Read Shader identity and manifest. Source only when include_source is true. No Import, delete, or Apply | no |
+| `propose_shader` | Post one shader document candidate or variation board. No prepare, consume, Import, delete, or Board Accept | **yes** |
 
 ### Selection guide
 

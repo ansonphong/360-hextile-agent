@@ -253,8 +253,9 @@ class Client:
         *,
         timeout: Optional[float] = None,
         params: Optional[Mapping[str, Any]] = None,
+        headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
-        return self.request_json("GET", path, timeout=timeout, params=params)
+        return self.request_json("GET", path, timeout=timeout, params=params, headers=headers)
 
     def post_json(
         self,
@@ -586,6 +587,62 @@ class Client:
                 "doc_generation": str(doc_generation),
                 "explanation": explanation,
             },
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
+    def get_shader_context(
+        self,
+        *,
+        origin: str,
+        shader_id: str,
+        project_context_witness: str,
+        include_source: bool = False,
+        working_revision: Optional[int] = None,
+    ) -> Any:
+        """GET /api/agent/shader-context. Metadata unless include_source is true."""
+        if origin not in ("builtin", "user", "project") or not shader_id or not project_context_witness:
+            raise HextileClientError(
+                "origin, shader_id, and project_context_witness are required",
+                status_code=None,
+                kind="other",
+            )
+        params: dict[str, Any] = {
+            "origin": origin,
+            "shader_id": shader_id,
+            "include_source": "true" if include_source else "false",
+        }
+        if working_revision is not None:
+            params["working_revision"] = int(working_revision)
+        return self.get_json(
+            "/api/agent/shader-context",
+            params=params,
+            headers={
+                "X-Hextile-Agent": "mcp",
+                "X-Hextile-Project-Witness": project_context_witness,
+            },
+        )
+
+    def propose_shader(self, body: Mapping[str, Any]) -> Any:
+        """POST /api/agent/shader-proposals. Does not prepare, consume, import, or delete."""
+        if not isinstance(body, Mapping):
+            raise HextileClientError("Shader proposal must be an object", status_code=None, kind="other")
+        kind = body.get("kind")
+        if kind not in ("shader_document_candidate", "shader_variation_board"):
+            raise HextileClientError(
+                "kind must be shader_document_candidate or shader_variation_board",
+                status_code=None,
+                kind="other",
+            )
+        for banned in ("import", "delete", "accept", "consume", "config_partial", "path"):
+            if banned in body:
+                raise HextileClientError(
+                    "Shader proposal cannot import, delete, or consume",
+                    status_code=None,
+                    kind="other",
+                )
+        return self.post_json(
+            "/api/agent/shader-proposals",
+            dict(body),
             headers={"X-Hextile-Agent": "mcp"},
         )
 

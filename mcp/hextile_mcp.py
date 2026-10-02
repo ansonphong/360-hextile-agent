@@ -44,6 +44,12 @@ CHILD_TOKEN_ENV = "HEXTILE_MCP_CHILD_TOKEN"
 
 # Canonical tool names — drift tests assert SKILL.md ⊆ this list.
 TOOL_NAMES = (
+    "list_hotkeys",
+    "inspect_hotkey",
+    "set_hotkey_bindings",
+    "remove_hotkey_binding",
+    "restore_hotkey",
+    "reset_hotkeys",
     "list_workflows",
     "get_workflow",
     "get_capabilities",
@@ -108,12 +114,8 @@ TOOL_NAMES = (
     "preflight_spot_clone",
     "clone_spot",
     "get_spot_clone",
-    "list_hotkeys",
-    "inspect_hotkey",
-    "set_hotkey_bindings",
-    "remove_hotkey_binding",
-    "restore_hotkey",
-    "reset_hotkeys",
+    "get_shader_context",
+    "propose_shader",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -154,6 +156,7 @@ _READ_ONLY = frozenset(
         "get_layer_generation",
         "preflight_spot_clone",
         "get_spot_clone",
+        "get_shader_context",
     }
 )
 _MUTATING = frozenset(
@@ -194,6 +197,7 @@ _MUTATING = frozenset(
         "land_generated_layer",
         "commit_layer_draft",
         "clone_spot",
+        "propose_shader",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -1548,6 +1552,38 @@ TOOLS: list[dict[str, Any]] = [
         {"render_id": {"type": "string"}, "node_id": _CLONE_NODE_ID},
         required=["render_id", "node_id"],
     ),
+    _tool_def(
+        "get_shader_context",
+        "Read the open Shader. Metadata only unless include_source is true. "
+        "Does not Import, delete, Accept a Board, prepare, or consume. "
+        "Never returns an absolute path or pixels.",
+        {
+            "origin": {"type": "string", "enum": ["builtin", "user", "project"]},
+            "shader_id": {"type": "string", "minLength": 1},
+            "project_context_witness": {"type": "string", "minLength": 1},
+            "include_source": {"type": "boolean", "default": False},
+            "working_revision": {"type": "integer", "minimum": 1},
+        },
+        required=["origin", "shader_id", "project_context_witness"],
+    ),
+    _tool_def(
+        "propose_shader",
+        "POST one shader_document_candidate or shader_variation_board and return its ticket id. "
+        "Does not Import, delete, Accept a Board, prepare, or consume.",
+        {
+            "kind": {
+                "type": "string",
+                "enum": ["shader_document_candidate", "shader_variation_board"],
+            },
+            "base": {"type": "object"},
+            "explanation": {"type": "string"},
+            "complete_candidate": {"type": "object"},
+            "source_edit": {"type": "object"},
+            "board_id": {"type": "string"},
+            "candidates": {"type": "array"},
+        },
+        required=["kind", "base"],
+    ),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
@@ -1777,6 +1813,8 @@ class HextileMcpServer:
             "preflight_spot_clone": self._preflight_spot_clone,
             "clone_spot": self._clone_spot,
             "get_spot_clone": self._get_spot_clone,
+            "get_shader_context": self._get_shader_context,
+            "propose_shader": self._propose_shader,
         }
         self._handlers.update({
             name: (lambda args, op=op: self.client.hotkeys_request(op, args))
@@ -2373,6 +2411,35 @@ class HextileMcpServer:
                 raise HextileClientError(f"{pose_name} must be a closed pose", kind="other")
         body = {key: args[key] for key in allowed - {"target", "render_id"} if key in args}
         return self.client.clone_spot(args["render_id"], body)
+
+    def _shader_ticket_identity(self, data: Any) -> dict[str, Any]:
+        if not isinstance(data, Mapping):
+            raise HextileClientError("Shader proposal did not return a ticket", kind="other")
+        if "ticket_id" not in data:
+            return dict(data)
+        identity = {key: data[key] for key in (
+            "ticket_id", "kind", "shader", "project_context_witness",
+        ) if key in data}
+        identity["ready"] = False
+        return identity
+
+    def _get_shader_context(self, args: dict[str, Any]) -> Any:
+        for banned in ("import", "delete", "accept", "consume", "path", "absolute_path"):
+            if banned in args:
+                raise HextileClientError("Shader context cannot import, delete, or apply", kind="other")
+        return self.client.get_shader_context(
+            origin=str(args.get("origin") or ""),
+            shader_id=str(args.get("shader_id") or ""),
+            project_context_witness=str(args.get("project_context_witness") or ""),
+            include_source=bool(args.get("include_source", False)),
+            working_revision=args.get("working_revision"),
+        )
+
+    def _propose_shader(self, args: dict[str, Any]) -> Any:
+        for banned in ("import", "delete", "accept", "consume", "config_partial", "path"):
+            if banned in args:
+                raise HextileClientError("Shader proposal cannot import, delete, or consume", kind="other")
+        return self._shader_ticket_identity(self.client.propose_shader(args))
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

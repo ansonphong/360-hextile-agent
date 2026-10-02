@@ -56,6 +56,12 @@ INSTALL_SPEC.loader.exec_module(INSTALL_MODULE)
 
 # P5 copies this name list as a frozenset tripwire in APP backend/api/routes/agent_events.py.
 EXPECTED_TOOLS = (
+    "list_hotkeys",
+    "inspect_hotkey",
+    "set_hotkey_bindings",
+    "remove_hotkey_binding",
+    "restore_hotkey",
+    "reset_hotkeys",
     "list_workflows",
     "get_workflow",
     "get_capabilities",
@@ -120,6 +126,8 @@ EXPECTED_TOOLS = (
     "preflight_spot_clone",
     "clone_spot",
     "get_spot_clone",
+    "get_shader_context",
+    "propose_shader",
 )
 
 
@@ -179,6 +187,9 @@ def test_open4_annotations_partition() -> None:
     assert "cancel_model_download" in _DESTRUCTIVE
     assert {"preflight_spot_clone", "get_spot_clone"} <= _READ_ONLY
     assert "clone_spot" in _MUTATING
+    assert "get_shader_context" in _READ_ONLY
+    assert "propose_shader" in _MUTATING
+    assert "propose_shader" not in _DESTRUCTIVE
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:
