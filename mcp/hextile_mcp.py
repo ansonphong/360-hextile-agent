@@ -1748,6 +1748,8 @@ class HextileMcpServer:
         self.client = client or Client(internal_mode=self.internal_mode)
         self.notify = notify
         self.session_id: Optional[str] = None
+        self.client_name: Optional[str] = None
+        self.client_version: Optional[str] = None
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "list_workflows": self._list_workflows,
             "get_workflow": self._get_workflow,
@@ -1832,6 +1834,8 @@ class HextileMcpServer:
 
         if method == "initialize":
             self._ensure_session_id()
+            self._remember_client(params.get("clientInfo"))
+            self._emit_heartbeat()
             return self._response(
                 msg_id,
                 {
@@ -1852,6 +1856,7 @@ class HextileMcpServer:
             return None
 
         if method == "ping":
+            self._emit_heartbeat()
             return self._response(msg_id, {})
 
         if method == "tools/list":
@@ -2018,6 +2023,33 @@ class HextileMcpServer:
         if not self.session_id:
             self.session_id = str(uuid.uuid4())
         return self.session_id
+
+    def _remember_client(self, info: Any) -> None:
+        if not isinstance(info, Mapping):
+            return
+        name = info.get("name")
+        version = info.get("version")
+        if isinstance(name, str) and name.strip():
+            self.client_name = name.strip()
+        if isinstance(version, str) and version.strip():
+            self.client_version = version.strip()
+
+    def _emit_heartbeat(self) -> None:
+        """Presence only. Not a tool phase. Skipped for the in-app child."""
+        if self.internal_mode:
+            return
+        envelope: dict[str, Any] = {
+            "schema": ACTIVITY_SCHEMA,
+            "kind": "heartbeat",
+            "session_id": self._ensure_session_id(),
+            "client_name": self.client_name or "MCP client",
+        }
+        if self.client_version:
+            envelope["client_version"] = self.client_version
+        try:
+            self.client.post_activity(envelope)
+        except Exception:
+            pass
 
     def _emit_activity(
         self,
