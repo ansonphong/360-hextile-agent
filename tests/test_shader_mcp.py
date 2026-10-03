@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+
+import jsonschema
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,116 @@ from hextile_mcp import TOOLS, HextileMcpServer  # noqa: E402
 def _schema(name: str) -> dict[str, Any]:
     return next(tool for tool in TOOLS if tool["name"] == name)
 
+
+
+def _proposal() -> dict[str, Any]:
+    return {
+        "kind": "shader_document_candidate", "explanation": "Enable mouse input",
+        "base": {"shader": {"origin": "user", "shaderId": "aurora"},
+                 "project_context_witness": "wit", "working_revision": 1,
+                 "document_hash": "sha256:" + "ab" * 32,
+                 "source_hash": "sha256:" + "cd" * 32, "manifest_hash": None},
+        "modulation_edits": {"schema": 1, "edits": [
+            {"op": "set_mouse_input", "value": {"schema": 1, "enabled": True, "abi": "hx-mouse/1"}}]},
+    }
+
+
+def _operations() -> list[dict[str, Any]]:
+    source = {"id": "mod_" + "a" * 24}
+    binding = {"id": "binding_" + "b" * 24}
+    definition = {"label": "Pulse", "alias": "MOD1", "kind": "time", "enabled": True,
+                  "source": "sin(2*pi*cycle)", "period_unit": "beats",
+                  "settings": {"period": 4, "speed": 1, "phase": 0,
+                               "output_min": -1, "output_max": 1, "duty": .5}}
+    added_binding = {"source_id": {"ref": "pulse"}, "target": "gain", "enabled": True,
+                     "signature": {"kind": "float", "unit": "scalar", "min": 0, "max": 1},
+                     "mode": "range", "range_min": 0, "range_max": 1}
+    return [
+        {"op": "add_source", "definition": definition, "ref": "pulse"},
+        {"op": "remove_source", "source": source},
+        {"op": "set_label", "source": source, "label": "Wave"},
+        {"op": "install_wave", "source": source, "wave": "Square (50%)"},
+        {"op": "set_expression", "source": source, "source_text": "cycle"},
+        {"op": "set_setting", "source": source, "setting": "period", "value": 2},
+        {"op": "set_period_unit", "source": source, "period_unit": "seconds"},
+        {"op": "set_click", "source": source, "button": "right", "mode": "toggle"},
+        {"op": "rename_alias", "source": source, "alias": "customAlias"},
+        {"op": "set_source_enabled", "source": source, "enabled": False},
+        {"op": "add_binding", "binding": added_binding, "ref": "gain"},
+        {"op": "update_binding", "binding": binding,
+         "value": {**added_binding, "id": binding["id"], "source_id": source["id"]}},
+        {"op": "remove_binding", "binding": binding},
+        {"op": "set_binding_enabled", "binding": binding, "enabled": False},
+        _proposal()["modulation_edits"]["edits"][0],
+        {"op": "set_master_clock", "value": {"schema": 1, "bpm": 120, "speed": 1,
+         "anchor": {"time": {"num": "0", "den": "1"}, "seconds": 0, "beats": 0}}},
+    ]
+
+
+def test_closed_modulation_catalog_and_existing_alternatives() -> None:
+    schema = _schema("propose_shader")["inputSchema"]
+    for operation in _operations():
+        proposal = _proposal()
+        proposal["modulation_edits"]["edits"] = [operation]
+        jsonschema.validate(proposal, schema)
+    for field, value in (("source_edit", {"from_utf16": 0, "to_utf16": 0,
+                                         "expected_text": "", "replacement": "x"}),
+                         ("complete_candidate", {"source": "x", "values": {}, "capture_defaults": {},
+                          "output": {}, "space": "direction_360", "extensions": {}})):
+        proposal = _proposal()
+        del proposal["modulation_edits"]
+        proposal[field] = value
+        jsonschema.validate(proposal, schema)
+    variants = schema["properties"]["modulation_edits"]["properties"]["edits"]["items"]["oneOf"]
+    assert {variant["properties"]["op"]["const"] for variant in variants} == {op["op"] for op in _operations()}
+
+
+@pytest.mark.parametrize("change", ["xor", "none", "unknown", "partial", "foreign", "null",
+                                     "count", "reference", "definition_id", "boolean"])
+def test_modulation_schema_refuses_malformed_batches(change: str) -> None:
+    proposal = _proposal()
+    edit = proposal["modulation_edits"]["edits"][0]
+    if change == "xor": proposal["source_edit"] = {}
+    elif change == "none": del proposal["modulation_edits"]
+    elif change == "unknown": edit["op"] = "arm"
+    elif change == "partial": del edit["value"]["abi"]
+    elif change == "foreign": edit["value"]["armed"] = True
+    elif change == "null": proposal["modulation_edits"] = None
+    elif change == "count": proposal["modulation_edits"]["edits"] *= 33
+    elif change == "reference": proposal["modulation_edits"]["edits"] = [{"op": "remove_source", "source": "MOD1"}]
+    elif change == "definition_id":
+        proposal["modulation_edits"]["edits"] = [_operations()[0]]
+        proposal["modulation_edits"]["edits"][0]["definition"]["id"] = "mod_" + "a" * 24
+    elif change == "boolean": edit["value"]["enabled"] = 1
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(proposal, _schema("propose_shader")["inputSchema"])
+
+
+def test_client_transports_exact_typed_batch_and_explicit_formula_consent() -> None:
+    client = Client()
+    metadata = {"modulation": {"definitions": [{"id": "mod_" + "a" * 24, "alias": "MOD1"}],
+                               "bindings": [], "mouse_input": {"schema": 1, "enabled": True, "abi": "hx-mouse/1"}}}
+    with mock.patch.object(client, "get_json", return_value=metadata) as get:
+        assert client.get_shader_context(origin="user", shader_id="aurora", project_context_witness="wit") == metadata
+        assert get.call_args.kwargs["params"]["include_source"] == "false"
+        assert get.call_args.kwargs["params"]["include_formula"] == "false"
+        assert "source" not in metadata
+        client.get_shader_context(origin="user", shader_id="aurora", project_context_witness="wit",
+                                  include_source=True, include_formula=True)
+        assert get.call_args.kwargs["params"]["include_source"] == "true"
+        assert get.call_args.kwargs["params"]["include_formula"] == "true"
+    proposal = _proposal()
+    original = deepcopy(proposal)
+    with mock.patch.object(client, "post_json", return_value={"ticket_id": "spt_abc"}) as post:
+        client.propose_shader(proposal)
+        assert post.call_args.args == ("/api/agent/shader-proposals", original)
+        assert proposal == original
+        for malformed in ({**proposal, "source_edit": {}}, {**proposal, "foreign": True},
+                          {**proposal, "modulation_edits": {"schema": 1, "edits": [proposal["modulation_edits"]["edits"][0]] * 33}},
+                          {**proposal, "modulation_edits": {"schema": 1, "edits": [{"op": "arm"}]}},
+                          {**proposal, "modulation_edits": {"schema": 1, "edits": [{"op": "set_label", "source": {"id": "mod_" + "a" * 24}, "label": "x" * 65537}]}}):
+            with pytest.raises(HextileClientError): client.propose_shader(malformed)
+        assert post.call_count == 1
 
 def test_shader_tool_schemas_cannot_import_delete_or_consume() -> None:
     for name in ("get_shader_context", "propose_shader"):
@@ -56,10 +169,7 @@ def test_shader_client_calls_context_and_proposal_only() -> None:
     client.get_shader_context(
         origin="user", shader_id="aurora", project_context_witness="wit", include_source=False,
     )
-    client.propose_shader({
-        "kind": "shader_document_candidate",
-        "base": {"shader": {"origin": "user", "shaderId": "aurora"}},
-    })
+    client.propose_shader(_proposal())
     assert [req.get_method() for req in seen] == ["GET", "POST"]
     assert seen[0].full_url.startswith("http://127.0.0.1:8000/api/agent/shader-context?")
     assert "include_source=false" in seen[0].full_url
@@ -92,11 +202,9 @@ def test_shader_handlers_return_context_and_ticket_identity() -> None:
     assert context["manifest"] == {}
     client.get_shader_context.assert_called_once_with(
         origin="user", shader_id="aurora", project_context_witness="wit",
-        include_source=False, working_revision=None,
+        include_source=False, include_formula=False, working_revision=None,
     )
-    identity = server._propose_shader({
-        "kind": "shader_document_candidate", "base": {"shader": {"origin": "user", "shaderId": "aurora"}},
-    })
+    identity = server._propose_shader(_proposal())
     assert identity == {
         "ticket_id": "spt_abc", "kind": "shader_document_candidate",
         "shader": {"origin": "user", "shaderId": "aurora"}, "ready": False,

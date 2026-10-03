@@ -72,6 +72,61 @@ class HextileClientError(RuntimeError):
         self.receipt = dict(receipt) if receipt is not None else None
 
 
+# Transport shape only. The APP store alone resolves references, checks domains/grants,
+# and materializes a canonical candidate; this proxy never generates IDs or replays edits.
+_SHADER_EDIT_FIELDS = {
+    "add_source": ({"definition"}, {"ref"}), "remove_source": ({"source"}, set()),
+    "set_label": ({"source", "label"}, set()), "install_wave": ({"source", "wave"}, set()),
+    "set_expression": ({"source", "source_text"}, set()),
+    "set_setting": ({"source", "setting", "value"}, set()),
+    "set_period_unit": ({"source", "period_unit"}, set()),
+    "set_click": ({"source", "button", "mode"}, set()), "rename_alias": ({"source", "alias"}, set()),
+    "set_source_enabled": ({"source", "enabled"}, set()), "add_binding": ({"binding"}, {"ref"}),
+    "update_binding": ({"binding", "value"}, set()), "remove_binding": ({"binding"}, set()),
+    "set_binding_enabled": ({"binding", "enabled"}, set()), "set_mouse_input": ({"value"}, set()),
+    "set_master_clock": ({"value"}, set()),
+}
+
+
+def validate_shader_proposal(body: Mapping[str, Any]) -> None:
+    """Reject foreign/XOR/oversized transport bodies before a local HTTP request."""
+    def refuse() -> None:
+        raise HextileClientError("Expected a closed Shader proposal", kind="other")
+
+    if not isinstance(body, Mapping):
+        refuse()
+    kind = body.get("kind")
+    if kind == "shader_document_candidate":
+        alternatives = set(body) & {"complete_candidate", "source_edit", "modulation_edits"}
+        if len(alternatives) != 1:
+            refuse()
+        field = next(iter(alternatives))
+        if set(body) != {"kind", "base", "explanation", field} or type(body[field]) is not dict:
+            refuse()
+        if field == "modulation_edits":
+            batch = body[field]
+            if (set(batch) != {"schema", "edits"} or type(batch["schema"]) is not int
+                    or batch["schema"] != 1 or type(batch["edits"]) is not list or len(batch["edits"]) > 32):
+                refuse()
+            try:
+                size = len(json.dumps(batch, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+            except (TypeError, ValueError, UnicodeError, RecursionError):
+                refuse()
+            if size > 65536:
+                refuse()
+            for edit in batch["edits"]:
+                if type(edit) is not dict or type(edit.get("op")) is not str or edit["op"] not in _SHADER_EDIT_FIELDS:
+                    refuse()
+                required, optional = _SHADER_EDIT_FIELDS[edit["op"]]
+                if not (required | {"op"}) <= edit.keys() or edit.keys() - required - optional - {"op"}:
+                    refuse()
+    elif kind == "shader_variation_board":
+        if set(body) != {"kind", "base", "board_id", "candidates"}:
+            refuse()
+    else:
+        refuse()
+
+
 class Client:
     """Sync HTTP wrapper around local APP routes (stdlib urllib)."""
 
@@ -597,10 +652,13 @@ class Client:
         shader_id: str,
         project_context_witness: str,
         include_source: bool = False,
+        include_formula: bool = False,
         working_revision: Optional[int] = None,
     ) -> Any:
         """GET /api/agent/shader-context. Metadata unless include_source is true."""
-        if origin not in ("builtin", "user", "project") or not shader_id or not project_context_witness:
+        if (origin not in ("builtin", "user", "project") or not shader_id or not project_context_witness
+                or type(include_source) is not bool or type(include_formula) is not bool
+                or (working_revision is not None and (type(working_revision) is not int or working_revision < 1))):
             raise HextileClientError(
                 "origin, shader_id, and project_context_witness are required",
                 status_code=None,
@@ -610,6 +668,7 @@ class Client:
             "origin": origin,
             "shader_id": shader_id,
             "include_source": "true" if include_source else "false",
+            "include_formula": "true" if include_formula else "false",
         }
         if working_revision is not None:
             params["working_revision"] = int(working_revision)
@@ -624,22 +683,7 @@ class Client:
 
     def propose_shader(self, body: Mapping[str, Any]) -> Any:
         """POST /api/agent/shader-proposals. Does not prepare, consume, import, or delete."""
-        if not isinstance(body, Mapping):
-            raise HextileClientError("Shader proposal must be an object", status_code=None, kind="other")
-        kind = body.get("kind")
-        if kind not in ("shader_document_candidate", "shader_variation_board"):
-            raise HextileClientError(
-                "kind must be shader_document_candidate or shader_variation_board",
-                status_code=None,
-                kind="other",
-            )
-        for banned in ("import", "delete", "accept", "consume", "config_partial", "path"):
-            if banned in body:
-                raise HextileClientError(
-                    "Shader proposal cannot import, delete, or consume",
-                    status_code=None,
-                    kind="other",
-                )
+        validate_shader_proposal(body)
         return self.post_json(
             "/api/agent/shader-proposals",
             dict(body),

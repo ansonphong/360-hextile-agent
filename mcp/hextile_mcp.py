@@ -34,6 +34,7 @@ from hextile_client import (  # noqa: E402
     Client,
     HextileClientError,
     error_payload,
+    validate_shader_proposal,
 )
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -370,6 +371,119 @@ def _layer_object(properties: dict[str, Any], required: tuple[str, ...] = ()) ->
         schema["required"] = list(required)
     return schema
 
+
+# Closed catalog syntax for the existing Shader proposal route. Semantic admission
+# (bounds relationships, expressions, references and source grants) stays in APP.
+_SHADER_TEXT = {"type": "string", "minLength": 1}
+_SHADER_BOOL = {"type": "boolean"}
+_SHADER_NUMBER = {"type": "number"}
+_SHADER_ALIAS = {"type": "string", "pattern": r"^(?!.*__)[A-Za-z][A-Za-z0-9_]{0,31}$"}
+_SHADER_REF_NAME = {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,31}$"}
+_SHADER_MOD_ID = {"type": "string", "pattern": r"^mod_[0-9a-f]{24}$"}
+_SHADER_BINDING_ID = {"type": "string", "pattern": r"^binding_[0-9a-f]{24}$"}
+
+
+def _shader_closed(properties: dict[str, Any], optional: tuple[str, ...] = ()) -> dict[str, Any]:
+    return _layer_object(properties, tuple(key for key in properties if key not in optional))
+
+
+def _shader_ref(identity: dict[str, Any]) -> dict[str, Any]:
+    return {"oneOf": [_shader_closed({"id": identity}), _shader_closed({"ref": _SHADER_REF_NAME})]}
+
+
+_SHADER_OUTPUT_SETTINGS = {
+    "output_min": {"type": "number", "minimum": -1e6, "maximum": 1e6},
+    "output_max": {"type": "number", "minimum": -1e6, "maximum": 1e6},
+}
+_SHADER_TIME_SETTINGS = {**_SHADER_OUTPUT_SETTINGS,
+    "period": {"type": "number", "minimum": 1e-6, "maximum": 86400},
+    "speed": {"type": "number", "minimum": 0, "maximum": 1024},
+    "phase": {"type": "number", "minimum": -1e9, "maximum": 1e9},
+    "duty": {"type": "number", "minimum": 0, "maximum": 1},
+}
+_SHADER_DEFINITION_COMMON = {"label": {"type": "string", "maxLength": 128},
+    "alias": _SHADER_ALIAS, "enabled": _SHADER_BOOL}
+_SHADER_DEFINITION = {"oneOf": [
+    _shader_closed({**_SHADER_DEFINITION_COMMON, "kind": {"const": "time"},
+        "source": {"type": "string", "minLength": 1, "maxLength": 512},
+        "period_unit": {"enum": ["seconds", "beats"]}, "settings": _shader_closed(_SHADER_TIME_SETTINGS)}),
+    _shader_closed({**_SHADER_DEFINITION_COMMON, "kind": {"const": "click"},
+        "button": {"enum": ["left", "right"]}, "mode": {"enum": ["gate", "toggle"]},
+        "settings": _shader_closed(_SHADER_OUTPUT_SETTINGS)}),
+]}
+_SHADER_SIGNATURE = _shader_closed({"kind": {"enum": ["float", "angle"]}, "unit": _SHADER_TEXT,
+    "min": _SHADER_NUMBER, "max": _SHADER_NUMBER})
+
+
+def _shader_binding(*, adding: bool) -> dict[str, Any]:
+    common = {"source_id": _shader_ref(_SHADER_MOD_ID) if adding else _SHADER_MOD_ID,
+        "target": _SHADER_TEXT, "signature": _SHADER_SIGNATURE, "enabled": _SHADER_BOOL}
+    if not adding:
+        common["id"] = _SHADER_BINDING_ID
+    return {"oneOf": [
+        _shader_closed({**common, "mode": {"const": "range"}, "range_min": _SHADER_NUMBER, "range_max": _SHADER_NUMBER}),
+        _shader_closed({**common, "mode": {"const": "add"}, "depth": {"type": "number", "minimum": 0}}),
+    ]}
+
+
+_SHADER_MOUSE = _shader_closed({"schema": {"const": 1}, "enabled": _SHADER_BOOL, "abi": {"const": "hx-mouse/1"}})
+_SHADER_CLOCK = _shader_closed({"schema": {"const": 1},
+    "bpm": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+    "speed": {"type": "number", "minimum": 0, "maximum": 1024},
+    "anchor": _shader_closed({"time": _shader_closed({
+        "num": {"type": "string", "pattern": r"^(0|-?[1-9][0-9]*)$", "maxLength": 20},
+        "den": {"type": "string", "pattern": r"^[1-9][0-9]*$", "maxLength": 20}}),
+        "seconds": {"type": "number", "minimum": -(2**40), "maximum": 2**40},
+        "beats": {"type": "number", "minimum": -(2**40), "maximum": 2**40}})})
+_SHADER_SOURCE_REF = _shader_ref(_SHADER_MOD_ID)
+_SHADER_BINDING_REF = _shader_ref(_SHADER_BINDING_ID)
+_SHADER_EDIT_PAYLOADS = {
+    "add_source": {"definition": _SHADER_DEFINITION, "ref": _SHADER_REF_NAME},
+    "remove_source": {"source": _SHADER_SOURCE_REF},
+    "set_label": {"source": _SHADER_SOURCE_REF, "label": {"type": "string", "maxLength": 128}},
+    "install_wave": {"source": _SHADER_SOURCE_REF, "wave": {"enum": ["Sine", "Triangle", "Saw up", "Saw down", "Pulse", "Square (50%)"]}},
+    "set_expression": {"source": _SHADER_SOURCE_REF, "source_text": {"type": "string", "minLength": 1, "maxLength": 512}},
+    "set_setting": {"source": _SHADER_SOURCE_REF, "setting": {"enum": list(_SHADER_TIME_SETTINGS)}, "value": _SHADER_NUMBER},
+    "set_period_unit": {"source": _SHADER_SOURCE_REF, "period_unit": {"enum": ["seconds", "beats"]}},
+    "set_click": {"source": _SHADER_SOURCE_REF, "button": {"enum": ["left", "right"]}, "mode": {"enum": ["gate", "toggle"]}},
+    "rename_alias": {"source": _SHADER_SOURCE_REF, "alias": _SHADER_ALIAS},
+    "set_source_enabled": {"source": _SHADER_SOURCE_REF, "enabled": _SHADER_BOOL},
+    "add_binding": {"binding": _shader_binding(adding=True), "ref": _SHADER_REF_NAME},
+    "update_binding": {"binding": _SHADER_BINDING_REF, "value": _shader_binding(adding=False)},
+    "remove_binding": {"binding": _SHADER_BINDING_REF},
+    "set_binding_enabled": {"binding": _SHADER_BINDING_REF, "enabled": _SHADER_BOOL},
+    "set_mouse_input": {"value": _SHADER_MOUSE}, "set_master_clock": {"value": _SHADER_CLOCK},
+}
+_SHADER_EDITS = _shader_closed({"schema": {"const": 1}, "edits": {"type": "array", "maxItems": 32,
+    "items": {"oneOf": [_shader_closed({"op": {"const": name}, **fields},
+        ("ref",) if name in ("add_source", "add_binding") else ()) for name, fields in _SHADER_EDIT_PAYLOADS.items()]}}})
+_SHADER_DIGEST = {"type": "string", "pattern": r"^sha256:[0-9a-f]{64}$"}
+_SHADER_BASE_PROPERTIES = {"shader": _shader_closed({"origin": {"enum": ["builtin", "user", "project"]}, "shaderId": {"type": "string", "minLength": 1, "pattern": r"^[a-zA-Z0-9_-]+$"}}),
+    "project_context_witness": _SHADER_TEXT, "working_revision": {"type": "integer", "minimum": 1},
+    "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST,
+    "manifest_hash": {"oneOf": [_SHADER_DIGEST, {"type": "null"}]}}
+_SHADER_CANDIDATE = _shader_closed({"source": {"type": "string"}, "values": {"type": "object"},
+    "capture_defaults": {"type": "object"}, "output": {"type": "object"},
+    "space": {"enum": ["direction_360", "equirect_map", "ray_360", "shadertoy_image"]}, "extensions": {"type": "object"}})
+_SHADER_SOURCE_EDIT = _shader_closed({"from_utf16": {"type": "integer", "minimum": 0},
+    "to_utf16": {"type": "integer", "minimum": 0}, "expected_text": {"type": "string"}, "replacement": {"type": "string"}})
+_SHADER_PROPOSAL_SCHEMA = _layer_object({"kind": {"enum": ["shader_document_candidate", "shader_variation_board"]},
+    "base": {"oneOf": [_shader_closed(_SHADER_BASE_PROPERTIES),
+        _shader_closed({**_SHADER_BASE_PROPERTIES, "frozen_capture_hash": _SHADER_DIGEST})]},
+    "explanation": _SHADER_TEXT, "complete_candidate": _SHADER_CANDIDATE,
+    "source_edit": _SHADER_SOURCE_EDIT, "modulation_edits": _SHADER_EDITS,
+    "board_id": _SHADER_TEXT, "candidates": {"type": "array", "minItems": 1,
+        "items": _shader_closed({"candidate_id": _SHADER_TEXT, "complete_candidate": _SHADER_CANDIDATE, "explanation": _SHADER_TEXT})}},
+    ("kind", "base"))
+_SHADER_PROPOSAL_SCHEMA["oneOf"] = [
+    {"properties": {"kind": {"const": "shader_document_candidate"}, "base": _shader_closed(_SHADER_BASE_PROPERTIES)},
+     "required": ["explanation", field], "not": {"anyOf": [{"required": [other]} for other in
+        ("complete_candidate", "source_edit", "modulation_edits", "board_id", "candidates") if other != field]}}
+    for field in ("complete_candidate", "source_edit", "modulation_edits")
+] + [{"properties": {"kind": {"const": "shader_variation_board"},
+        "base": _shader_closed({**_SHADER_BASE_PROPERTIES, "frozen_capture_hash": _SHADER_DIGEST})},
+      "required": ["board_id", "candidates"], "not": {"anyOf": [{"required": [field]} for field in
+        ("explanation", "complete_candidate", "source_edit", "modulation_edits")]}}]
 
 _LAYER_ID = {"type": "string", "pattern": "^[0-9a-f]{12}([0-9a-f]{20})?$"}
 _LAYER_JOB_ID = {"type": "string", "pattern": "^[0-9a-f]{32}$"}
@@ -1562,28 +1676,16 @@ TOOLS: list[dict[str, Any]] = [
             "shader_id": {"type": "string", "minLength": 1},
             "project_context_witness": {"type": "string", "minLength": 1},
             "include_source": {"type": "boolean", "default": False},
+            "include_formula": {"type": "boolean", "default": False,
+                "description": "Explicitly include bounded hx-math formulas in metadata; never grants GLSL read."},
             "working_revision": {"type": "integer", "minimum": 1},
         },
         required=["origin", "shader_id", "project_context_witness"],
     ),
-    _tool_def(
-        "propose_shader",
-        "POST one shader_document_candidate or shader_variation_board and return its ticket id. "
-        "Does not Import, delete, Accept a Board, prepare, or consume.",
-        {
-            "kind": {
-                "type": "string",
-                "enum": ["shader_document_candidate", "shader_variation_board"],
-            },
-            "base": {"type": "object"},
-            "explanation": {"type": "string"},
-            "complete_candidate": {"type": "object"},
-            "source_edit": {"type": "object"},
-            "board_id": {"type": "string"},
-            "candidates": {"type": "array"},
-        },
-        required=["kind", "base"],
-    ),
+    {"name": "propose_shader",
+     "description": "POST one closed Shader proposal, including typed modulation_edits, and return ticket identity. "
+                    "APP alone checks grants and materializes IDs. Does not Import, Accept, Apply, Run or arm input.",
+     "inputSchema": _SHADER_PROPOSAL_SCHEMA, "annotations": _annotations("propose_shader")},
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
@@ -2456,14 +2558,15 @@ class HextileMcpServer:
         return identity
 
     def _get_shader_context(self, args: dict[str, Any]) -> Any:
-        for banned in ("import", "delete", "accept", "consume", "path", "absolute_path"):
-            if banned in args:
-                raise HextileClientError("Shader context cannot import, delete, or apply", kind="other")
+        if (set(args) - {"origin", "shader_id", "project_context_witness", "include_source", "include_formula", "working_revision"}
+                or any(type(args[key]) is not bool for key in ("include_source", "include_formula") if key in args)):
+            raise HextileClientError("Expected closed Shader context arguments", kind="other")
         return self.client.get_shader_context(
             origin=str(args.get("origin") or ""),
             shader_id=str(args.get("shader_id") or ""),
             project_context_witness=str(args.get("project_context_witness") or ""),
-            include_source=bool(args.get("include_source", False)),
+            include_source=args.get("include_source", False),
+            include_formula=args.get("include_formula", False),
             working_revision=args.get("working_revision"),
         )
 
@@ -2471,6 +2574,7 @@ class HextileMcpServer:
         for banned in ("import", "delete", "accept", "consume", "config_partial", "path"):
             if banned in args:
                 raise HextileClientError("Shader proposal cannot import, delete, or consume", kind="other")
+        validate_shader_proposal(args)
         return self._shader_ticket_identity(self.client.propose_shader(args))
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
