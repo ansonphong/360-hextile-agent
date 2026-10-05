@@ -121,6 +121,9 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
 | `get_shader_context` | Read Shader identity and manifest. Source only when include_source is true. No Import, delete, or Apply | no |
 | `propose_shader` | Post one shader document candidate or variation board. No prepare, consume, Import, delete, or Board Accept | **yes** |
+| `open_shader_workspace` | Acknowledge attachment of the exact clean Project Shader and return its two native files; follow the installed `360-hextile` skill | **yes** |
+| `register_shader_update` | Register an exact two-file digest for automatic APP Prepare/compile checks; never Apply | **yes** |
+| `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
 
 ### Selection guide
 
