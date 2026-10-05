@@ -6,6 +6,7 @@ import json
 import ast
 import http.client
 import io
+import re
 import urllib.error
 from copy import deepcopy
 
@@ -447,3 +448,84 @@ def test_workspace_missing_route_is_actionable_without_rewriting_old_peer_error(
         Client(opener=opener).open_shader_workspace(_workspace_open())
     assert caught.value.kind == "upgrade" and "Upgrade 360 Hextile" in str(caught.value)
     assert caught.value.body == '{"detail":"Not Found"}'
+
+
+def _playable_recipe() -> tuple[list[str], dict[str, Any]]:
+    guide = (ROOT / "skills/hextile/references/recipes.md").read_text(encoding="utf-8")
+    shader_section = guide.split("## Recipe I — Playable Shaders:", 1)[1]
+    sources = re.findall(r"```glsl\n(.*?)```", shader_section, re.S)
+    extensions = json.loads(re.search(r"```json\n(.*?)```", shader_section, re.S).group(1))
+    return sources, extensions
+
+
+def test_playable_recipes_match_shipped_sources_and_bound_contracts() -> None:
+    # These are the two accepted producer examples, not schema stubs. Read-only
+    # admission checks keep a copied guide from teaching fields APP rejects.
+    app = ROOT.parent / "360-HEXTILE-APP"
+    sys.path.insert(0, str(app))
+    from backend.modulation.conventions import validate_conventions
+    from backend.modulation.contracts import validate_modulation
+
+    examples = json.loads((app / "frontend/src/lib/shader/convention-examples.json").read_text(encoding="utf-8"))
+    sources, extensions = _playable_recipe()
+    assert sources == [row["candidate"]["source"] for row in examples]
+    assert extensions == examples[1]["candidate"]["extensions"]
+    assert extensions["required_capabilities"] == ["conventions/1", "master-clock/1", "modulation/2"]
+    manifest = json.loads(sources[1].split("/*@hextile-shader\n", 1)[1].split("\n*/", 1)[0])
+    descriptors = [{"id": "shader.params." + p["id"], "kind": p["type"], "unit": "unitless",
+                    "min": p["ui"]["min"], "max": p["ui"]["max"], "base": p["default"], "live": True} for p in manifest["parameters"]]
+    validate_conventions(extensions["conventions"], descriptors)
+    validate_modulation(extensions["modulation"], descriptors, extensions["master_clock"],
+                        require_aliases=True, logical_inputs=extensions["conventions"])
+    assert "vec3 ro = hxCameraPosition;" in sources[0]
+    assert "vec3 rd = hxCameraDirection(hx.direction);" in sources[0]
+    assert "hxParam_glow" in sources[1] and "BLAST" in sources[1]
+    assert extensions["conventions"]["camera"] is None
+
+
+@pytest.mark.parametrize("variant", ["held", "instant", "orphan", "default_one", "schema_one"])
+def test_playable_recipe_variants_use_real_intrinsic_admission(variant: str) -> None:
+    sys.path.insert(0, str(ROOT.parent / "360-HEXTILE-APP"))
+    from backend.modulation.contracts import ContractError, validate_modulation_intrinsic
+
+    _, extensions = _playable_recipe()
+    definition = extensions["modulation"]["definitions"][0]
+    if variant == "held":
+        definition["mode"] = "held"
+        definition["settings"].update(attack=0.2, release=0.6)
+    elif variant == "instant":
+        definition["settings"]["attack"] = 0
+    elif variant == "orphan":
+        definition["input_id"] = "missing_gate"
+    elif variant == "default_one":
+        extensions["conventions"]["channels"][1]["default"] = 1
+    else:
+        extensions["modulation"]["schema"] = 1
+
+    def admit() -> None:
+        validate_modulation_intrinsic(extensions["modulation"], extensions["master_clock"],
+                                      require_aliases=True, logical_inputs=extensions["conventions"])
+
+    if variant in {"held", "instant"}:
+        admit()
+    else:
+        with pytest.raises(ContractError):
+            admit()
+
+
+def test_playable_tool_guidance_preserves_legacy_authority_and_no_new_controls() -> None:
+    context = _schema("get_shader_context")["description"]
+    proposal = _schema("propose_shader")["description"]
+    workspace = _schema("open_shader_workspace")["description"]
+    assert "source-free" in context and "include_formula only" in context
+    assert "every Board row" in proposal and "preserve" in proposal
+    assert "attested" in proposal and "envelope" in proposal
+    assert "conventions/1" in workspace and "modulation/2" in workspace
+    assert "hxCameraDirection(vec3 canonicalDirection)" in workspace
+    assert "never arms Interact" in workspace
+    operations = _schema("propose_shader")["inputSchema"]["properties"]["modulation_edits"]
+    assert operations["properties"]["schema"] == {"const": 1}
+    assert not {"press_key", "set_pose", "arm_interact", "save_project_convention"} & {tool["name"] for tool in TOOLS}
+    source = (ROOT / "skills/hextile/SKILL.md").read_text(encoding="utf-8")
+    fragment = (ROOT / "codex/AGENTS-fragment.md").read_text(encoding="utf-8")
+    assert fragment.split("-->\n\n", 1)[1] == source.split("\n---\n", 1)[1].lstrip("\n")

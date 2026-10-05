@@ -418,12 +418,20 @@ _WORKSPACE_GUIDANCE = (
     "Existing divergent files require explicit existing_workspace adoption of the reported exact digest. "
     "APP owns eight handles, one attachment, eight receipts per handle, one current complete candidate, a 300-second idle TTL "
     "capped by lease and an aggregate 8 MiB workspace-copy budget; this proxy has no workspace cache or scheduler. "
+    "For Playable Shaders, read recipes and best-practices plus acknowledged closed conventions/1 instructions. "
     "Pass through APP ABI/conventions instructions, available and executable_capabilities; observe execution_ready "
     "independently of the current document declaration. Check conventions/1 and modulation/2 separately. "
+    "Author Enter -> default-0 logical gate -> schema-2 oneshot BLAST (20 ms Linear Attack, "
+    "400 ms Ease Out Release, exponent 2) -> Range -> declared Glow parameter and GLSL effect "
+    "as one complete two-file candidate, with the default Master Clock and sorted sidecar declarations. "
+    "Camera helpers are vec3 hxCameraPosition, mat3 hxCameraRotation, vec3 hxCameraDirection(vec3 canonicalDirection); "
+    "camera:null is identity. Fly GLSL must use ro=hxCameraPosition and rd=hxCameraDirection(hx.direction). "
     "Schema-2 modulation envelopes target stable typed logical input IDs shared with future INPUT session bindings. "
     "Portable conventions/1 sources remain keyboard/mouse. MIDI/OSC/gamepad adapters are future/unsupported unless APP "
     "reports their availability; executable capabilities or keyboard bindings do not prove adapter availability. "
-    "Do not author source IDs, packets or live events or invent workspace flags in get_capabilities."
+    "Do not author source IDs, packets or live events or invent workspace flags in get_capabilities. "
+    "Control authoring never arms Interact, presses keys, changes live pose, writes Project presets or self Applies. "
+    "A shortcut conflict requires an explicit remap proposal, not a compiler-failure claim or Hotkeys override."
 )
 
 
@@ -1708,7 +1716,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "get_shader_context",
-        "Read the open Shader. Metadata only unless include_source is true. "
+        "Read the open Shader, including bounded source-free Playable Shaders conventions/1 and modulation/2 metadata "
+        "with channel aliases and camera helper signatures. GLSL and resolved authoring bytes require include_source "
+        "and its separate source grant; include_formula only grants hx-math formulas. "
         "Does not Import, delete, Accept a Board, prepare, or consume. "
         "Never returns an absolute path or pixels.",
         {
@@ -1724,7 +1734,11 @@ TOOLS: list[dict[str, Any]] = [
     ),
     {"name": "propose_shader",
      "description": "POST one closed Shader proposal, including typed modulation_edits, and return ticket identity. "
-                    "APP alone checks grants and materializes IDs. Does not Import, Accept, Apply, Run or arm input.",
+                    "APP alone checks grants and materializes IDs. Legacy proposals and every Board row must preserve Playable "
+                    "conventions, envelope definitions/input refs/settings, envelope-sourced mappings and their capability declarations. "
+                    "To first create or revise Playable controls, use the attested source.glsl/authoring.json workspace "
+                    "and installed 360-hextile skill. Does not Import, Accept, Apply, Run, arm Interact, press keys, "
+                    "set live pose or write Project presets.",
      "inputSchema": _SHADER_PROPOSAL_SCHEMA, "annotations": _annotations("propose_shader")},
     {"name": "open_shader_workspace",
      "description": "Attach native files for a Project Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,

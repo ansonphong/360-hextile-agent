@@ -8,7 +8,7 @@ Install id: **`hextile-agent@360-hextile`**. Marketplace `360-hextile`. Skill/MC
 
 See `references/agent-lexicon.md` for locked words, the complementarity card, and `REFUSE_*` strings.
 
-For native Project Shader file editing, invoke the installed **`360-hextile`** skill. It owns the acknowledged two-file attachment, register/check/repair procedure and human Apply boundary. Check the host's installed invocation syntax; this hub remains the general Workflow automation entry.
+For native Project Shader file editing, invoke the installed **`360-hextile`** skill. It owns the acknowledged two-file attachment, register/check/repair procedure and human Apply boundary, including **Playable Shaders** (`conventions/1`, `modulation/2`). Read `recipes` and `best-practices`: one Enter-blast request authors the parameter, GLSL, logical gate, keyboard binding, BLAST envelope and Range mapping together. Observe APP `available`, executable capabilities and candidate `execution_ready`; declarations alone do not prove support. Control authoring never arms Interact, presses keys, changes live pose or writes Project presets. Check the host's installed invocation syntax; this hub remains the general Workflow automation entry.
 
 - Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
 - MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
@@ -116,8 +116,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `remove_hotkey_binding` | Remove one assigned Hotkey chord | **yes** |
 | `restore_hotkey` | Restore one Hotkey to its factory bindings | **yes** |
 | `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
-| `get_shader_context` | Read Shader identity and manifest. Source only when include_source is true. No Import, delete, or Apply | no |
-| `propose_shader` | Post one shader document candidate or variation board. No prepare, consume, Import, delete, or Board Accept | **yes** |
+| `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
+| `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
 | `open_shader_workspace` | Acknowledge attachment of the exact clean Project Shader and return its two native files; follow the installed `360-hextile` skill | **yes** |
 | `register_shader_update` | Register an exact two-file digest for automatic APP Prepare/compile checks; never Apply | **yes** |
 | `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
