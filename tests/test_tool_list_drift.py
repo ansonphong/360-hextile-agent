@@ -21,6 +21,7 @@ from typing import Any, Optional
 from unittest import mock
 
 import pytest
+import jsonschema
 
 ROOT = Path(__file__).resolve().parents[1]
 MCP_DIR = ROOT / "mcp"
@@ -734,6 +735,38 @@ def test_mcp_tools_list_rpc() -> None:
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == list(EXPECTED_TOOLS)
     assert set(server._handlers) == set(EXPECTED_TOOLS)
+    discovered = {tool["name"]: tool for tool in resp["result"]["tools"]}
+    opened = discovered["open_shader_workspace"]["inputSchema"]
+    got = discovered["get_shader_update"]["inputSchema"]
+    registered = discovered["register_shader_update"]["inputSchema"]
+    assert opened["properties"]["workspace_schema"] == {"type": "integer", "const": 2}
+    assert "workspace_schema" not in opened["required"]
+    assert got["properties"]["include_source_diagnostics"] == {"type": "boolean", "default": False}
+    legacy = {"shader": {"origin": "project", "shaderId": "test"}, "project_context_witness": "wit",
+              "studio_surface_id": "surface", "expected_working_revision": 1,
+              "expected_document_hash": "sha256:" + "ab" * 32, "expected_source_hash": "sha256:" + "cd" * 32}
+    absent = {key: value for key, value in {**legacy, "workspace_schema": 2}.items() if not key.startswith("expected_")}
+    for args in (legacy, {**legacy, "workspace_schema": 2}, absent):
+        jsonschema.validate(args, opened)
+    for schema in (opened, got, registered):
+        assert schema["additionalProperties"] is False
+        assert not {"apply", "approved", "git", "source", "path", "complete_candidate"} & schema["properties"].keys()
+    for args in ({**absent, "workspace_schema": 3}, {**absent, "expected_working_revision": 1}):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(args, opened)
+    update = {"handle": "sw_test", "change_id": "sw_test:1", "project_context_witness": "wit"}
+    for args in (update, {**update, "include_source_diagnostics": False}, {**update, "include_source_diagnostics": True}):
+        jsonschema.validate(args, got)
+    for flag in (1, "true", None):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({**update, "include_source_diagnostics": flag}, got)
+    assert not any("git" in name or name in {"apply_shader", "compile_shader", "read_resource"} for name in names)
+    assert discovered["get_shader_update"]["annotations"]["readOnlyHint"] is True
+    assert discovered["open_shader_workspace"]["annotations"]["readOnlyHint"] is False
+    assert discovered["register_shader_update"]["annotations"]["readOnlyHint"] is False
+    for method in ("resources/list", "resources/read"):
+        response = server.handle_rpc({"jsonrpc": "2.0", "id": 2, "method": method, "params": {}})
+        assert response["error"]["code"] == -32601
 
 
 def test_mcp_initialize() -> None:
@@ -989,6 +1022,21 @@ def test_get_guide_reads_real_markdown() -> None:
     site = load_guide("website-index")
     assert "360hextile.com/docs/hextile/" in site["markdown"]
     assert "/docs/automation" in site["markdown"]  # says there is NO such page
+    client = Client(opener=lambda *_a, **_k: pytest.fail("guides must be local"))
+    client.post_activity = mock.Mock()  # APP telemetry is independent of local guide reads.
+    server = HextileMcpServer(client=client)
+    for name in ("index", *GUIDE_NAMES):
+        response = server.handle_rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                      "params": {"name": "get_guide", "arguments": {"name": name}}})
+        result = response["result"]
+        assert result["isError"] is False
+        assert json.loads(result["content"][0]["text"]) == load_guide(name)
+        if name != "index":
+            assert load_guide(name)["markdown"].strip()
+    refused = server.handle_rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                "params": {"name": "get_guide", "arguments": {"name": "../../private"}}})
+    assert refused["result"]["isError"] is True
+    assert "Unknown guide" in refused["result"]["content"][0]["text"]
 
 
 def test_mcp_get_guide_and_save_builtin() -> None:

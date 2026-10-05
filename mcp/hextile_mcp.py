@@ -411,6 +411,8 @@ _WORKSPACE_GUIDANCE = (
     "Never reuse the v1 pair digest for v2. Originals/resources are verified separately; unlisted files confer nothing. "
     "get_shader_update include_source_diagnostics:true requests bounded logical locations under the current source grant, witness and candidate. "
     "Omitted/false keeps the source-free legacy receipt. Missing support requires upgrade/reconnect, never downgrade. "
+    "Workspace schema 2 is format support; source-modules/1 execution requires APP available and executable_capabilities. "
+    "Recognized capabilities, guide text and version numbers do not prove execution or installed host filesystem access. "
     "Open requires a clean Project Shader, Follow and whole-source read/propose authority. "
     "Only acknowledged open returns files after APP acquires the mounted readonly/autosave hold. "
     "V1 edits source.glsl (64 KiB) and authoring.json (2 MiB), with a complete derived document <= 2 MiB. "

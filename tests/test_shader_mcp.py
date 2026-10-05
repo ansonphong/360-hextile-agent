@@ -625,6 +625,80 @@ def test_workspace_v2_register_granted_diagnostics_repair_keeps_full_set_identit
         {key: value for key, value in args.items() if key != "handle"} for args in (first, repaired)]
 
 
+@pytest.mark.parametrize("available,executable", [(False, []), (True, []), (True, ["source-modules/1"])])
+def test_workspace_v2_negotiated_capabilities_are_not_inferred_from_format_or_guides(available: bool, executable: list[str]) -> None:
+    attachment = {**_workspace_attachment_v2({"kind": "unaccepted", "authoring_digest": "sha256:" + "12" * 32}),
+                  "available": available, "recognized_capabilities": ["source-modules/1"], "executable_capabilities": executable}
+    receipt = {**_workspace_receipt(), "base": attachment["base"]}
+    if not available or "source-modules/1" not in executable:
+        receipt.update(prepare="failed", compile="not_requested", preview="not_requested",
+                       diagnostics=[{"phase": "prepare", "severity": "error", "code": "unsupported_capability",
+                                     "message": "source-modules/1 is not executable"}])
+    else:
+        receipt.update(prepare="pending", compile="not_requested", preview="not_requested", diagnostics=[])
+    calls = []
+
+    def opener(req: Any, timeout: Any = None) -> _WorkspaceResponse:
+        calls.append(req)
+        return _WorkspaceResponse(attachment if req.full_url.endswith("/open") else receipt)
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    assert server._open_shader_workspace(_workspace_open_v2()) == attachment
+    assert server._register_shader_update(_workspace_register()) == receipt
+    assert len(calls) == 2 and receipt["compile"] == "not_requested"  # No proxy compiler/execution claim.
+    guidance = _schema("open_shader_workspace")["description"]
+    assert "source-modules/1 execution requires APP available and executable_capabilities" in guidance
+    assert "version numbers do not prove execution or installed host filesystem access" in guidance
+
+
+def test_workspace_v2_old_peer_200_refuses_and_v1_remains_unchanged() -> None:
+    seen = []
+
+    def opener(req: Any, timeout: Any = None) -> _WorkspaceResponse:
+        seen.append(json.loads(req.data))
+        return _WorkspaceResponse(_workspace_attachment())
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    assert server._open_shader_workspace(_workspace_open()) == _workspace_attachment()
+    with pytest.raises(HextileClientError) as caught:
+        server._open_shader_workspace({**_workspace_open(), "workspace_schema": 2})
+    assert caught.value.kind == "upgrade" and "reconnect" in str(caught.value)
+    assert seen == [_workspace_open(), {**_workspace_open(), "workspace_schema": 2}]
+
+
+@pytest.mark.parametrize("status,detail", [(404, "Not Found"),
+    (409, {"code": "workspace_version_required", "message": "Unsupported workspace schema", "recovery": "Upgrade and reconnect"})])
+def test_workspace_v2_missing_or_unsupported_peer_refuses_once(status: int, detail: Any) -> None:
+    calls = []
+
+    def opener(req: Any, timeout: Any = None) -> Any:
+        calls.append(json.loads(req.data))
+        raise urllib.error.HTTPError(req.full_url, status, "unsupported", None, io.BytesIO(json.dumps({"detail": detail}).encode()))
+
+    with pytest.raises(HextileClientError) as caught:
+        HextileMcpServer(client=Client(opener=opener))._open_shader_workspace(_workspace_open_v2())
+    assert calls == [_workspace_open_v2()]
+    assert caught.value.kind == ("upgrade" if status == 404 else "http")
+    assert caught.value.receipt == (detail if isinstance(detail, dict) else None)
+
+
+@pytest.mark.parametrize("operation", ["open_shader_workspace", "register_shader_update"])
+def test_workspace_v2_uncertain_mutations_do_not_replay_or_release_paths(operation: str) -> None:
+    calls = []
+
+    def opener(req: Any, timeout: Any = None) -> Any:
+        calls.append(req)
+        raise http.client.RemoteDisconnected("reply lost")
+
+    args = _workspace_open_v2() if operation == "open_shader_workspace" else _workspace_register()
+    server = HextileMcpServer(client=Client(opener=opener))
+    handler = server._open_shader_workspace if operation == "open_shader_workspace" else server._register_shader_update
+    with pytest.raises(HextileClientError) as caught:
+        handler(args)
+    assert caught.value.kind == "app_down" and caught.value.receipt is None  # Existing transport classification.
+    assert len(calls) == 1
+
+
 def _playable_recipe() -> tuple[list[str], dict[str, Any]]:
     guide = (ROOT / "skills/hextile/references/recipes.md").read_text(encoding="utf-8")
     shader_section = guide.split("## Recipe I — Playable Shaders:", 1)[1]
