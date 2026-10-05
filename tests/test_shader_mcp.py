@@ -417,6 +417,25 @@ def test_workspace_lost_open_never_retries_or_claims_attachment(operation: str) 
     assert caught.value.body is None and caught.value.receipt is None
 
 
+def test_workspace_empty_registration_is_unknown() -> None:
+    class EmptyBody:
+        status = 200
+
+        def read(self) -> bytes:
+            return b"null"
+
+        def __enter__(self) -> "EmptyBody":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    server = HextileMcpServer(client=Client(opener=lambda *_a, **_k: EmptyBody()))
+    result = server.call_tool("register_shader_update", _workspace_register())
+    assert result["isError"] is True
+    assert json.loads(result["content"][0]["text"])["kind"] == "workspace_outcome_unknown"
+
+
 def test_workspace_replay_and_history_are_app_owned() -> None:
     receipt = _workspace_receipt()
     observed: list[Any] = []

@@ -800,7 +800,17 @@ class Client:
         validate_shader_workspace("register", args)
         handle = urllib.parse.quote(args["handle"], safe="")
         body = {key: args[key] for key in ("change_id", "expected_generation", "content_digest")}
-        return self._shader_workspace_request("POST", f"/api/agent/shader-workspaces/{handle}/updates", body)
+        result = self._shader_workspace_request("POST", f"/api/agent/shader-workspaces/{handle}/updates", body)
+        if (not isinstance(result, dict) or result.get("handle") != args["handle"]
+                or result.get("change_id") != args["change_id"]
+                or result.get("content_digest") != args["content_digest"]
+                or type(result.get("generation")) is not int
+                or not 0 <= result["generation"] <= MAX_WORKSPACE_GENERATION
+                or type(result.get("candidate_id")) is not str or not result["candidate_id"]):
+            raise HextileClientError(
+                "Shader workspace registration acknowledgement unknown; read the current receipt before retrying.",
+                kind="workspace_outcome_unknown")
+        return result
 
     def get_shader_update(self, args: Mapping[str, Any]) -> Any:
         validate_shader_workspace("get", args)
