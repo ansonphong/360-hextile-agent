@@ -2,6 +2,8 @@
 """Idempotent Codex twin installer for hextile-agent.
 
 Writes:
+  ~/.agents/skills/360-hextile/SKILL.md
+  ~/.agents/skills/360-hextile/.hextile-agent-marker
   ~/.agents/skills/hextile/SKILL.md
   ~/.agents/skills/hextile/.hextile-agent-marker  (version marker)
   ~/.agents/skills/hextile-upres/SKILL.md
@@ -25,9 +27,10 @@ import shutil
 import sys
 from pathlib import Path
 
-PACKAGE_VERSION = "0.3.0"
+PACKAGE_VERSION = "0.4.0"
 MIN_CODEX = "0.34.0"
 MARKER_NAME = ".hextile-agent-marker"
+SKILL_NAMES = ("hextile", "hextile-upres", "360-hextile")
 MCP_SECTION = "mcp_servers.hextile"
 BEGIN_MARK = "# >>> hextile-agent begin (do not edit between markers)"
 END_MARK = "# <<< hextile-agent end"
@@ -111,9 +114,23 @@ def _copy_skill_dest(home: Path, name: str, dry_run: bool) -> Path:
 
 
 def ensure_skills(home: Path, dry_run: bool) -> Path:
-    agents_root = _copy_skill_dest(home, "hextile", dry_run)
-    _copy_skill_dest(home, "hextile-upres", dry_run)
-    return agents_root
+    # Refuse every conflict before refreshing any installed sibling.
+    for name in SKILL_NAMES:
+        src = package_root() / "skills" / name / "SKILL.md"
+        if not src.is_file():
+            raise SystemExit(f"Missing skill source: {src}")
+        dest = home / ".agents" / "skills" / name
+        marker = dest / MARKER_NAME
+        if (dest.exists() or dest.is_symlink()) and (
+            dest.is_symlink()
+            or not dest.is_dir()
+            or marker.is_symlink()
+            or not marker.is_file()
+        ):
+            raise SystemExit(f"Refusing to overwrite unowned skill destination: {dest}")
+    for name in SKILL_NAMES:
+        _copy_skill_dest(home, name, dry_run)
+    return home / ".agents" / "skills" / "hextile"
 
 
 def patch_config(config_path: Path, script: Path, dry_run: bool) -> None:
@@ -160,19 +177,20 @@ def _rmtree(path: Path, dry_run: bool) -> None:
 
 
 def uninstall(home: Path, dry_run: bool) -> None:
-    agents_root = home / ".agents" / "skills" / "hextile"
     codex_home = home / ".codex"
     config_path = codex_home / "config.toml"
-    if agents_root.is_dir():
-        _rmtree(agents_root, dry_run)
-    else:
-        print(f"No skills dir at {agents_root}")
-
-    upres_root = home / ".agents" / "skills" / "hextile-upres"
-    if upres_root.is_dir() and (upres_root / MARKER_NAME).is_file():
-        _rmtree(upres_root, dry_run)
-    elif upres_root.is_dir():
-        print(f"Leaving unmarked {upres_root}")
+    for name in SKILL_NAMES:
+        dest = home / ".agents" / "skills" / name
+        marker = dest / MARKER_NAME
+        if (
+            dest.is_dir() and not dest.is_symlink()
+            and marker.is_file() and not marker.is_symlink()
+        ):
+            _rmtree(dest, dry_run)
+        elif dest.exists() or dest.is_symlink():
+            print(f"Leaving unowned {dest}")
+        else:
+            print(f"No skills dir at {dest}")
 
     # Marker-owned leftover from pre-0.2.1 (~/.codex/skills/hextile). Never
     # delete an unmarked tree or sibling files.
