@@ -1,0 +1,104 @@
+---
+name: 360-hextile
+description: "Edit the open Project Shader in 360 Hextile through native source.glsl and authoring.json files, register exact bytes, inspect real APP compiler diagnostics and repair within a bounded turn. Leaves Apply to the human."
+---
+
+# 360 Hextile — Shader file authoring
+
+This is the authoritative Shader procedure. The installed `hextile` skill remains the general Workflow automation hub. Reasoning runs in the user's coding host; APP owns attachment, candidate checks and accepted documents. The host account/provider may bill or limit reasoning.
+
+## Arguments
+
+Accept the user's requested Shader change as natural language. Resolve identity from fresh APP discovery, never from a guessed name, cached render or user-supplied path. Ask about an ambiguous creative outcome before changing files. This skill does not authorize unrelated installs, host permission changes, Git operations, UI Save/Discard or Apply.
+
+## Prerequisites
+
+- The installed `hextile` MCP connector must work with the running localhost APP, and the host must have native read/write access to the same physical Project/worktree files. MCP connectivity alone does not prove shared-file access.
+- A Project Shader must be open in Shader Workshop, with a clean saved draft, MCP Follow ON and a current whole-asset grant: `scope="asset"`, `source_read=true`, `propose=true`, with no selection-only restriction. Source disclosure and ingestion require this authority; human Apply has its own authority check.
+- Invoke the installed skill named `360-hextile` using the host's observed skill picker/command. Claude plugin invocation may have a namespace rather than bare `/360-hextile`. Check installed Codex and Grok syntax; folder/frontmatter names do not prove universal slash commands or installed-client compatibility.
+
+If APP is down, say **Launch 360 Hextile, then retry**. For missing MCP, point to the package README's host install/reconnect instructions; do not install, restart APP or change host permissions on the user's behalf. Grants constrain APP disclosure, ingestion and Apply; they are not a filesystem sandbox for the coding host.
+
+## Discover
+
+1. Inspect host MCP `tools/list` for `get_capabilities`, `get_live_context`, `get_shader_context`, `get_guide`, `open_shader_workspace`, `register_shader_update` and `get_shader_update`. Missing names mean an incompatible installed connector; report the missing names. Do not invent flags or capabilities in `get_capabilities`.
+2. Call `get_capabilities` for the existing APP Workflow handshake, then `get_live_context`. Read `current_surface` and the separate current Follow/grant metadata. Require `kind="shader_workshop"`, `shader={origin:"project",shaderId}`, `studio_surface_id`, `project_context_witness`, and `base={working_revision,document_hash,source_hash,manifest_hash}`. Absent, expired or unsupported surface stops discovery. An unchanged Git HEAD or checked-in Project ID cannot prove physical worktree identity.
+3. Require `draft_state="clean"` for a fresh attachment. Dirty/saving/unknown drafts need the human to resolve Save/Discard or reopen Workshop; do not flush, discard or attach over them. An existing `external_attached` state requires exact acknowledged reopen under the original authority, not a new attachment assumption.
+4. Call `get_shader_context(origin="project", shader_id=<discovered shaderId>, project_context_witness=<discovered witness>, working_revision=<base revision>, include_source=true)` only with the whole-source grant. Read `get_guide(name="recipes")` and `get_guide(name="best-practices")` before authoring fields.
+5. Call `open_shader_workspace` with exactly the discovered `shader`, `project_context_witness`, `studio_surface_id`, `expected_working_revision`, `expected_document_hash` and `expected_source_hash`. Supply no path. If existing files diverge, show the exact digest/base conflict and obtain explicit adoption of those existing bytes; only then add `existing_workspace={action:"adopt",expected_content_digest:<shown digest>}`. Never merge, reseed or overwrite existing files to attach.
+6. Wait for successful acknowledged open with `attachment_state="attached"`, a real `handle`, `generation`, `content_digest`, matching Shader/surface/witness and `files={source_path,authoring_path}`. APP must acquire the mounted readonly/autosave hold before paths are released. A reservation, socket notice or transport timeout is not attachment. After lost open transport, attempt at most one reopen with the exact original tuple, including optional adoption digest. If acknowledgement remains unknown, stop with blocked/reconnect guidance; do not invent a handle or edit presumed files.
+7. Open only the two returned files, using a verified native path mapping if Windows and WSL names differ. Resolve the physical Project/worktree and regular, non-symlink files, read both, and compute the digest below **before editing**. It must equal acknowledged `content_digest`; this is the same-file byte probe. A mismatch/inaccessible path stops with rediscovery guidance; do not guess another root. Read all acknowledged workspace ABI/schema/capability instructions. APP never writes these files after materialization; the host writes only this pair.
+
+## Edit and register
+
+Edit `source.glsl` and `authoring.json` natively as one coherent batch. Preserve the existing inline manifest/ABI/schema and parameter declarations, unrelated extensions, resource identities/bytes, Looks and provenance. Keep the sidecar's closed top-level schema and immutable `base`; it contains `kind="360hextile.shader-workspace"`, `schema=1`, `base`, `values`, `capture_defaults`, `output`, `space`, `extensions`. Do not edit managed snapshots, `shader.json`, resources, a preset registry or any other file. Source is bounded to 64 KiB, sidecar and derived document to 2 MiB each; respect tighter acknowledged limits.
+
+Compute the digest from **raw bytes in source-then-authoring order**, with no newline conversion, JSON normalization or text decoding. Substitute only the two acknowledged native paths:
+
+```python
+from pathlib import Path
+import hashlib
+
+source = Path(source_path).read_bytes()
+authoring = Path(authoring_path).read_bytes()
+framed = (b"360hextile.shader-workspace.v1\0"
+          + len(source).to_bytes(8, "big") + source
+          + len(authoring).to_bytes(8, "big") + authoring)
+content_digest = "sha256:" + hashlib.sha256(framed).hexdigest()
+```
+
+After completing both writes, use `expected_generation=<returned generation>` and `change_id=handle+":"+str(expected_generation+1)`. Call `register_shader_update(handle, change_id, expected_generation, content_digest)`, with no source, paths or Apply flags. Keep this original tuple for reconciliation. Registration freezes the matching candidate, advances generation and **automatically** starts APP Prepare and mounted Workshop compile/preview; no Check click is required.
+
+The opaque handle is ASCII alphanumeric/`_`/`-`, at most 64 characters and contains no colon. The suffix is positive canonical decimal, no leading zeros, at most 16 digits and at most `2**53-1`; bound length before integer conversion and require the exact handle namespace. New `expected_generation` is a nonnegative safe integer at most `2**53-2`. Encode the whole change ID, including its colon, as one URL path segment if constructing a transport URL. Never use UUIDs/arbitrary IDs, future gaps or generation wraparound.
+
+On an unknown registration reply, read `get_shader_update(handle, change_id, project_context_witness=<acknowledged open witness>)`; if a replay is needed, use only the exact original ID/digest/expected generation. Retained exact replay returns its original receipt even after generation advances. Changed retained input is `409 idempotency_conflict`; a missing historical generation is `410 receipt_expired`, never permission to recreate it. Namespace, noncanonical suffix, suffix mismatch or future gap is `409 generation_conflict`. Preserve files and stop to rediscover when authority is unknown.
+
+### Capability-aware authoring
+
+Use the acknowledged instructions' observed `available`, `executable_capabilities` and candidate `execution_ready`, independently of current document declarations. A clean nonconvention base may opt in when APP actually executes `conventions/1`; lacking a declaration is different from an unsupported runtime. Before executable support and its closed schema are observed, report unsupported rather than inventing definitions or promising Playable behavior.
+
+With supported `conventions/1`, author the complete candidate in the same pair: inline parameter manifest and GLSL in `source.glsl`; values, document space, sorted `extensions.required_capabilities` including `conventions/1` and a fully resolved `extensions.conventions` in `authoring.json`. Capability admission reads sidecar extensions, not a source-header capability declaration or invented header/sidecar mirror check. Use the shipped built-in preset resolution or already authorized resolved Project-derived bytes; no Project profile read tool exists. Follow the returned closed schema and exact generated channel aliases. Intrinsic validation checks the definition itself; shader-bound validation checks parameter/channel/resource compatibility.
+
+Camera helpers are `hxCameraPosition`, `hxCameraRotation` and `hxCameraDirection(vec3 canonicalDirection)`. `camera:null` gives identity camera helpers. A camera-aware ray marcher must explicitly wire `ro=hxCameraPosition` and `rd=hxCameraDirection(hx.direction)` into its own ray logic; helper presence alone does not move a scene. The host authors control data, never live pose, key presses or Interact arming.
+
+Teach the executable keyboard recipe first, only when APP is available, the complete candidate is execution_ready and both `conventions/1` and `modulation/2` are executable: resolved Enter key binding → stable default-0 logical gate ID → schema-2 `modulation/2` oneshot BLAST → existing Range mapping to Glow → declared parameter/default/bounds and GLSL glow term. BLAST uses finite 20 ms Linear Attack and 400 ms Ease Out Release, exponent 2. Keep sorted `conventions/1`, `master-clock/1`, `modulation/2` declarations and the default Master Clock object explicit. Obtain exact fields/aliases from current instructions and guides; do not invent ADSR/event fields. Preserve modulation schema 2 on later edits; workspace sidecar schema 1 and derived Shader document schema are distinct contracts.
+
+Held uses a default-0 gate and follows aggregate press/release; one-shot Burst retriggers from its current level without stacked voices. Attack and Release curves are independent; zero Attack is a Burst option. Repeated held key events are not fresh presses. Explain only the producer's observed retrigger/key-repeat behavior. Report shortcut conflicts and propose an explicit remap without pressing keys or changing Hotkeys.
+
+Conditionally, focused keyboard, a future MIDI note, OSC `/blast` with sender event identity or an observed gamepad button may target the same typed input through INPUT session routes **only when those adapters are installed and admitted**. Portable conventions sources remain keyboard/mouse; never put MIDI/OSC/gamepad source kinds, source epochs/sequences, device addresses, session routes or live packets in either file. Known schemas/declarations do not prove installed adapters. The active host orders/deduplicates observations per source epoch/sequence, ORs held contributors, emits `down` for first press, `trigger` for another fresh press, no edge for intermediate release and `up` for last release. Trigger-only pulses do not hold. Disconnect removes only that source's contributions; healthy sibling holds remain. Burst promises neither stacked voices nor two visible pulses.
+
+## Poll and repair
+
+Poll `get_shader_update(handle, change_id, project_context_witness=<witness returned by acknowledged open>)`. Do not replace that witness with a fresh discovery witness to revive an old handle. Require the receipt to identify the exact candidate, generation, content_digest and current check_attempt; use its separate `prepare`, `compile`, `preview`, `presentation`, `save`, `attachment_state`, reason and diagnostics. Report missing fields as unknown.
+
+For pending results honor `next_poll_ms`, with backoff capped between 250 ms and 2 s. Bound each candidate to at most 60 seconds from registration and stop at the earlier `check_deadline_at`; polling never extends the deadline. A terminal unavailable compiler, unsupported capability, stalled pending, permission/attachment loss, user Stop or generation exhaustion ends the turn. Do not repair unsupported runtime into a claimed pass without changed observed runtime support.
+
+If candidate/digest-bound Prepare fails intrinsic or shader-bound schema/binding/parameter admission, or actual compile fails, read diagnostics' phase, severity, file, line, column and bounded raw driver log when present. A valid container with malformed input/settings/mappings can register before semantic Prepare fails. Malformed/orphaned inputs, default-1 gates, missing declarations or targets and compiler errors all use this same loop. Do not invent a line or assume prepare failure is compile failure.
+
+Repair only the allowed pair, only where diagnostics support a safe edit. Complete writes, recompute digest and re-register in this same host turn using **returned_generation** as expected_generation and `handle+":"+str(returned_generation+1)` as a fresh ID. Then poll the new candidate. Permit at most **three repair attempts after the initial registration** (four candidates total), without an intermediate Check click. Stop early on exact current compile pass; otherwise end on exhaustion or any terminal condition with the last real receipt/diagnostics. No safe repair also ends the turn.
+
+Never equate disk-written, registered, Prepare passed, compile passed, preview published, presentation shown, painted pixels, saved in Hextile or Git committed. Compiler success does not prove visual correctness, physical Enter behavior or timing. Last-known-good pixels do not certify current bytes. A preview failure/unavailable result is reported separately even if compilation passed.
+
+## Recovery and Retry
+
+Preserve authored files for every refusal. No recovery silently installs software, changes host permissions, overwrites files, retries Apply or claims that APP stopped the model.
+
+| Result | Recovery |
+|---|---|
+| 403 Follow/grant/lease absent | Identify the existing MCP Follow/whole-asset source_read/propose UI grant needed; wait for the human, then rediscover. |
+| 409 `attachment_not_ready` | Human resolves dirty draft with Save/Discard or reopens Workshop. Skill invocation alone never authorizes these UI actions. |
+| 503 `attachment_unavailable` | Restore APP/transport, rediscover; a notice or timeout proves no ownership. |
+| 409 `attachment_conflict` | Rediscover current holder and identity without overwriting files. |
+| Other 409 context/base/generation/idempotency/digest/collection conflict | Read exact reason. Reconcile original receipt or rediscover exact identity; finish stable two-file writes for a collection/digest conflict. Never reuse a changed retained ID or guess current authority. |
+| 410 expired/evicted receipt or workspace | Preserve files, rediscover current surface/grants and explicitly reattach/adopt as required. No receipt recreation or automatic adoption. |
+| 413 byte/document limits | Report the acknowledged limits; reduce only the requested candidate if safely possible, never truncate resource data or unknown fields. |
+| 422 shape/schema/policy/resource refusal | Read exact reason; correct only permitted authoring data. Admission refusal has no new generation; candidate-bound semantic failures use the repair loop. |
+| Other 503 storage/check unavailable or terminal unsupported execution | Report real receipt/reason, stop and identify the unavailable support. Do not substitute a static pass. |
+
+On timeout/stall/exhaustion report the exact last handle/change ID/generation/digest/check_attempt, separate states, reason and last diagnostics, then offer **Retry**: “Re-enter the installed `360-hextile` skill in this same coding host with ‘Retry the Shader change’ and the prior receipt.” Check the host's actual invocation syntax. A new host turn rediscovers authority before continuing preserved files; expired authority requires reattachment and explicit adoption where needed. APP Retry only rechecks the same candidate with a fresh check attempt; it cannot wake an idle CLI or restart reasoning. A notification does not restart an idle host either. On user Stop stop new edits/calls; do not assert already-admitted compute or external reasoning was cancelled by APP.
+
+## Human Apply
+
+Leave the exact passing candidate for the human's Workshop review and **Apply**. Never self Apply, synthesize an approval, arm Interact or save via another tool. Source/check grants do not authorize durable saving. Human Apply rechecks current Project/base/grants and actual candidate-bound compile proof through APP's existing authority/CAS door.
+
+Report saved only after an exact server-observed `save="saved"` receipt with accepted revision/hash. An unknown save remains unknown until reconciled; never replay a save mutation. APP advances the handle's accepted base after acknowledged Apply while the sidecar's original `base` provenance remains unchanged. Git commit is a separate user-authorized action and cannot be inferred from Apply.

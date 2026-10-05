@@ -11,6 +11,8 @@ Install id: **`hextile-agent@360-hextile`**. Marketplace `360-hextile`. Skill/MC
 
 See `references/agent-lexicon.md` for locked words, the complementarity card, and `REFUSE_*` strings.
 
+For native Project Shader file editing, invoke the installed **`360-hextile`** skill. It owns the acknowledged two-file attachment, register/check/repair procedure and human Apply boundary. Check the host's installed invocation syntax; this hub remains the general Workflow automation entry.
+
 - Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
 - MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
 - MCP cannot `goto` or arm/operate an open Layers session (`REFUSE_NAV_MCP`, `REFUSE_LAYERS_MCP`).

@@ -1,6 +1,6 @@
 # 360-hextile-agent
 
-**v0.3.0**
+**v0.4.0**
 
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
@@ -83,6 +83,7 @@ python3 codex/install.py
 
 This writes:
 
+- `~/.agents/skills/360-hextile/SKILL.md`
 - `~/.agents/skills/hextile/SKILL.md` + `references/`
 - `~/.agents/skills/hextile-upres/SKILL.md`
 - `[mcp_servers.hextile]` **stdio** entry in `~/.codex/config.toml`  
@@ -153,8 +154,16 @@ Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
 | `list_sequences` | `GET /api/sequences/` |
 | `stop_sequence` | `POST /api/sequences/{id}/stop` |
 
-Instruction surface: **`skills/hextile/SKILL.md`** (canonical hub) plus **`skills/hextile-upres/SKILL.md`**.  
+Instruction surface: **`skills/360-hextile/SKILL.md`** (authoritative Shader file procedure), **`skills/hextile/SKILL.md`** (general automation hub) and **`skills/hextile-upres/SKILL.md`**.
 Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SKILL only.
+
+### Shader authoring in your coding host
+
+The `360-hextile` skill edits the open Project Shader through the acknowledged `source.glsl` / `authoring.json` pair, registers a raw-byte framed digest and polls real APP Prepare/compiler receipts, with at most three repairs. Workshop Apply stays human. Installed MCP connectivity and native access to the same physical Project/worktree files are both required; a remote connector alone is insufficient. APP grants control disclosure/ingestion/Apply, not the host's filesystem permissions. Reasoning belongs to your host account/provider and may incur charges or quota limits.
+
+Claude discovers sibling skills through the plugin's `./skills/` directory; its plugin namespace may differ from bare `/360-hextile`. Codex uses separately installed sibling skill directories: confirm both `360-hextile` and the retained `hextile` in the installed picker. Check actual Codex/Grok invocation syntax on the installed client; source layout is not installed-host proof, and Grok's Shader invocation remains pending that proof. Reconnect the `hextile` MCP server if tools are absent, and launch APP if it is unavailable. Do not infer Shader support from ordinary Workflow tools.
+
+Open a clean Project Shader in Workshop, enable MCP Follow and whole-asset source_read/propose grants, then invoke the installed skill with your requested change. If open acknowledgement is unknown, preserve files and reconnect; never edit presumed paths. Timeout or exhausted repairs includes the last exact receipt and instructions to re-enter this same host skill. APP Retry rechecks a candidate; it cannot wake an idle coding host. Playable and input-adapter guidance is conditional on observed executable support, not merely document declarations. Neither compiler pass nor a preview certifies physical input behavior or saving.
 
 ### Ordinary render file export
 
@@ -217,6 +226,7 @@ hextile-agent/
   .claude-plugin/marketplace.json
   .grok-plugin/marketplace.json
   .mcp.json
+  skills/360-hextile/SKILL.md
   skills/hextile/SKILL.md
   skills/hextile/references/
   skills/hextile-upres/SKILL.md
