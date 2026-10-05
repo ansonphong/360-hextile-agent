@@ -128,6 +128,15 @@ def ensure_skills(home: Path, dry_run: bool) -> Path:
             or not marker.is_file()
         ):
             raise SystemExit(f"Refusing to overwrite unowned skill destination: {dest}")
+        copied_nodes = [src]
+        src_refs = src.parent / "references"
+        if src_refs.is_dir():
+            copied_nodes.extend([src_refs, *src_refs.rglob("*")])
+        for node in copied_nodes:
+            target = dest / node.relative_to(src.parent)
+            matching_type = target.is_dir() if node.is_dir() else target.is_file()
+            if target.is_symlink() or (target.exists() and not matching_type):
+                raise SystemExit(f"Refusing conflicting skill destination: {target}")
     for name in SKILL_NAMES:
         _copy_skill_dest(home, name, dry_run)
     return home / ".agents" / "skills" / "hextile"
@@ -195,10 +204,14 @@ def uninstall(home: Path, dry_run: bool) -> None:
     # Marker-owned leftover from pre-0.2.1 (~/.codex/skills/hextile). Never
     # delete an unmarked tree or sibling files.
     legacy_dir = codex_home / "skills" / "hextile"
-    if legacy_dir.is_dir() and (legacy_dir / MARKER_NAME).is_file():
+    legacy_marker = legacy_dir / MARKER_NAME
+    if (
+        legacy_dir.is_dir() and not legacy_dir.is_symlink()
+        and legacy_marker.is_file() and not legacy_marker.is_symlink()
+    ):
         _rmtree(legacy_dir, dry_run)
-    elif legacy_dir.is_dir():
-        print(f"Leaving unmarked {legacy_dir}")
+    elif legacy_dir.exists() or legacy_dir.is_symlink():
+        print(f"Leaving unowned {legacy_dir}")
 
     if config_path.is_file():
         existing = config_path.read_text(encoding="utf-8")

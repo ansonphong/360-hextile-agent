@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -153,6 +154,72 @@ def test_install_and_uninstall_leave_symlinked_skill(tmp_path: Path, name: str) 
     assert INSTALL.main(["--uninstall", "--home", str(tmp_path)]) == 0
     assert dest.is_symlink()
     assert keep.read_text(encoding="utf-8") == "foreign skill"
+
+
+@pytest.mark.parametrize("name,relative,conflict", [
+    ("360-hextile", "SKILL.md", "symlink"),
+    ("360-hextile", "SKILL.md", "directory"),
+    ("hextile", "references", "file"),
+    ("hextile", "references", "symlink"),
+    ("hextile", "references/best-practices.md", "directory"),
+    ("hextile", "references/best-practices.md", "symlink"),
+])
+def test_refresh_refuses_copied_node_conflicts_before_any_change(
+    tmp_path: Path, name: str, relative: str, conflict: str,
+) -> None:
+    assert INSTALL.main(["--home", str(tmp_path)]) == 0
+    skills = tmp_path / ".agents" / "skills"
+    # This sibling would be refreshed first without a complete preflight.
+    (skills / "hextile" / "SKILL.md").write_text("stale sibling", encoding="utf-8")
+    target = skills / name / relative
+    was_directory = target.is_dir()
+    if was_directory:
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    foreign = tmp_path / "foreign-target"
+    if conflict == "symlink":
+        if was_directory:
+            foreign.mkdir()
+            (foreign / "keep.txt").write_text("foreign content", encoding="utf-8")
+        else:
+            foreign.write_text("foreign content", encoding="utf-8")
+        target.symlink_to(foreign, target_is_directory=was_directory)
+    elif conflict == "directory":
+        target.mkdir()
+    else:
+        target.write_text("foreign content", encoding="utf-8")
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    with pytest.raises(SystemExit, match="Refusing conflicting skill destination"):
+        INSTALL.main(["--home", str(tmp_path)])
+
+    after = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert after == before
+    assert target.is_symlink() if conflict == "symlink" else target.exists()
+
+
+@pytest.mark.parametrize("link", ["root", "marker"])
+def test_uninstall_preserves_symlinked_legacy_ownership(tmp_path: Path, link: str) -> None:
+    legacy = tmp_path / ".codex" / "skills" / "hextile"
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    (foreign / INSTALL.MARKER_NAME).write_text("foreign marker", encoding="utf-8")
+    (foreign / "keep.txt").write_text("foreign content", encoding="utf-8")
+    legacy.parent.mkdir(parents=True)
+    if link == "root":
+        legacy.symlink_to(foreign, target_is_directory=True)
+    else:
+        legacy.mkdir()
+        (legacy / INSTALL.MARKER_NAME).symlink_to(foreign / INSTALL.MARKER_NAME)
+        (legacy / "keep.txt").write_text("legacy content", encoding="utf-8")
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    assert INSTALL.main(["--uninstall", "--home", str(tmp_path)]) == 0
+
+    after = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert after == before
+    assert legacy.exists()
 
 
 def test_fragment_tracks_legacy_hub_and_source_versions_agree() -> None:
