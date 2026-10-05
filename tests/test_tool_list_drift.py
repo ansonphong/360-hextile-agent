@@ -128,6 +128,9 @@ EXPECTED_TOOLS = (
     "get_spot_clone",
     "get_shader_context",
     "propose_shader",
+    "open_shader_workspace",
+    "register_shader_update",
+    "get_shader_update",
 )
 
 
@@ -190,6 +193,9 @@ def test_open4_annotations_partition() -> None:
     assert "get_shader_context" in _READ_ONLY
     assert "propose_shader" in _MUTATING
     assert "propose_shader" not in _DESTRUCTIVE
+    assert "get_shader_update" in _READ_ONLY
+    assert {"open_shader_workspace", "register_shader_update"} <= _MUTATING
+    assert not {"open_shader_workspace", "register_shader_update"} & _DESTRUCTIVE
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:
@@ -746,7 +752,12 @@ def test_mcp_initialize() -> None:
     )
     assert resp is not None
     assert resp["result"]["serverInfo"]["name"] == "hextile"
+    assert resp["result"]["serverInfo"]["version"] == "0.4.0"
+    assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert "tools" in resp["result"]["capabilities"]
+    instructions = resp["result"]["instructions"]
+    for term in ("current_surface", "executable_capabilities", "execution_ready", "conventions/1", "modulation/2", "keyboard/mouse", "MIDI/OSC/gamepad"):
+        assert term in instructions
 
 
 def test_private_headers_are_request_local() -> None:

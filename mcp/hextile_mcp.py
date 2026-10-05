@@ -35,11 +35,12 @@ from hextile_client import (  # noqa: E402
     HextileClientError,
     error_payload,
     validate_shader_proposal,
+    validate_shader_workspace,
 )
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.4.0"
 ACTIVITY_SCHEMA = "hextile.agent.activity.v1"
 CHILD_TOKEN_ENV = "HEXTILE_MCP_CHILD_TOKEN"
 
@@ -117,6 +118,9 @@ TOOL_NAMES = (
     "get_spot_clone",
     "get_shader_context",
     "propose_shader",
+    "open_shader_workspace",
+    "register_shader_update",
+    "get_shader_update",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -158,6 +162,7 @@ _READ_ONLY = frozenset(
         "preflight_spot_clone",
         "get_spot_clone",
         "get_shader_context",
+        "get_shader_update",
     }
 )
 _MUTATING = frozenset(
@@ -199,6 +204,8 @@ _MUTATING = frozenset(
         "commit_layer_draft",
         "clone_spot",
         "propose_shader",
+        "open_shader_workspace",
+        "register_shader_update",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -385,6 +392,39 @@ _SHADER_BINDING_ID = {"type": "string", "pattern": r"^binding_[0-9a-f]{24}$"}
 
 def _shader_closed(properties: dict[str, Any], optional: tuple[str, ...] = ()) -> dict[str, Any]:
     return _layer_object(properties, tuple(key for key in properties if key not in optional))
+
+
+_WORKSPACE_ID = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z0-9_-]+$"}
+_WORKSPACE_WITNESS = {"type": "string", "minLength": 1, "maxLength": 256}
+_WORKSPACE_DIGEST = {"type": "string", "pattern": r"^sha256:[0-9a-f]{64}$"}
+_WORKSPACE_CHANGE = {"type": "string", "maxLength": 81,
+                     "pattern": r"^[A-Za-z0-9_-]{1,64}:[1-9][0-9]{0,15}$",
+                     "description": "<handle>:<expected_generation+1>; suffix <= 9007199254740991, no leading zeros. Replay the original ID, generation and digest only."}
+_WORKSPACE_GUIDANCE = (
+    "Discover the three workspace tools via MCP tools/list; get_capabilities remains the APP workflow handshake. "
+    "Read get_live_context.current_surface and existing Follow/grants; presence alone grants nothing. "
+    "Open requires a clean Project Shader, Follow and whole-source read/propose authority. "
+    "Only acknowledged open returns the two files after APP acquires the mounted readonly/autosave hold. "
+    "Edit source.glsl (64 KiB) and authoring.json (2 MiB), with a complete derived document <= 2 MiB. "
+    "Keep sidecar base immutable. Digest raw bytes without newline/JSON normalization: sha256: + SHA256("
+    "b'360hextile.shader-workspace.v1\\0' + uint64be(len(source)) + source + uint64be(len(authoring)) + authoring). "
+    "Register automatically checks the frozen candidate; it never wakes idle intelligence or synthesizes Apply. "
+    "Poll prepare/compile/preview/presentation/save, attachment_state, check_attempt and candidate-bound diagnostics; "
+    "prepare success is not compile proof or a save. Human Apply in Workshop advances the accepted base after acknowledgement. "
+    "APP Retry rechecks the same candidate; a native-file repair uses a fresh canonical change_id. "
+    "After a lost open reply, make at most one identical open request with the same surface, witness, Shader, saved hashes/revision "
+    "and optional adoption digest; changed authority requires rediscovery. Never infer attachment from a notice or timeout. "
+    "410 means authority/receipt expired: preserve files, rediscover and reopen; never recreate successful receipts. "
+    "Existing divergent files require explicit existing_workspace adoption of the reported exact digest. "
+    "APP owns eight handles, one attachment, eight receipts per handle, one current complete candidate, a 300-second idle TTL "
+    "capped by lease and an aggregate 8 MiB workspace-copy budget; this proxy has no workspace cache or scheduler. "
+    "Pass through APP ABI/conventions instructions, available and executable_capabilities; observe execution_ready "
+    "independently of the current document declaration. Check conventions/1 and modulation/2 separately. "
+    "Schema-2 modulation envelopes target stable typed logical input IDs shared with future INPUT session bindings. "
+    "Portable conventions/1 sources remain keyboard/mouse. MIDI/OSC/gamepad adapters are future/unsupported unless APP "
+    "reports their availability; executable capabilities or keyboard bindings do not prove adapter availability. "
+    "Do not author source IDs, packets or live events or invent workspace flags in get_capabilities."
+)
 
 
 def _shader_ref(identity: dict[str, Any]) -> dict[str, Any]:
@@ -1686,6 +1726,35 @@ TOOLS: list[dict[str, Any]] = [
      "description": "POST one closed Shader proposal, including typed modulation_edits, and return ticket identity. "
                     "APP alone checks grants and materializes IDs. Does not Import, Accept, Apply, Run or arm input.",
      "inputSchema": _SHADER_PROPOSAL_SCHEMA, "annotations": _annotations("propose_shader")},
+    {"name": "open_shader_workspace",
+     "description": "Attach native files for a Project Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,
+     "inputSchema": _shader_closed({
+         "shader": _shader_closed({"origin": {"const": "project"}, "shaderId": {
+             "type": "string", "minLength": 1, "maxLength": 128, "pattern": r"^[A-Za-z0-9_-]+$"}}),
+         "project_context_witness": _WORKSPACE_WITNESS,
+         "expected_working_revision": {"type": "integer", "minimum": 1},
+         "expected_document_hash": _WORKSPACE_DIGEST, "expected_source_hash": _WORKSPACE_DIGEST,
+         "studio_surface_id": _WORKSPACE_WITNESS,
+         "existing_workspace": _shader_closed({"action": {"const": "adopt"}, "expected_content_digest": _WORKSPACE_DIGEST}),
+     }, ("existing_workspace",)), "annotations": _annotations("open_shader_workspace")},
+    _tool_def("register_shader_update",
+        "Register native file bytes once for automatic APP prepare/compile/preview. "
+        "change_id is <handle>:<expected_generation+1>, never an arbitrary ID. "
+        "Exact retained replay returns its receipt after generation advances; changed retained inputs refuse idempotency_conflict, "
+        "expired historical receipts stay 410. Do not send GLSL, paths or Apply authority. "
+        "Use the raw-byte digest described by open_shader_workspace; preserve returned diagnostics and check_attempt.",
+        {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE,
+         "expected_generation": {"type": "integer", "minimum": 0, "maximum": 2**53 - 2},
+         "content_digest": _WORKSPACE_DIGEST},
+        required=["handle", "change_id", "expected_generation", "content_digest"]),
+    _tool_def("get_shader_update",
+        "Read one exact authorized workspace receipt, including attachment_state, check_attempt, "
+        "prepare/compile/preview/presentation/save and bounded diagnostics/raw_log/reason. "
+        "Pass the Project witness returned by open; no files or source are returned. "
+        "Honor next_poll_ms and check_deadline_at; polling never extends the attempt or saves. "
+        "410 receipt_expired/workspace_expired remains terminal; rediscover current authority without deleting files.",
+        {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE, "project_context_witness": _WORKSPACE_WITNESS},
+        required=["handle", "change_id", "project_context_witness"]),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
@@ -1919,6 +1988,9 @@ class HextileMcpServer:
             "get_spot_clone": self._get_spot_clone,
             "get_shader_context": self._get_shader_context,
             "propose_shader": self._propose_shader,
+            "open_shader_workspace": self._open_shader_workspace,
+            "register_shader_update": self._register_shader_update,
+            "get_shader_update": self._get_shader_update,
         }
         self._handlers.update({
             name: (lambda args, op=op: self.client.hotkeys_request(op, args))
@@ -1950,6 +2022,7 @@ class HextileMcpServer:
                     "instructions": (
                         "Call get_capabilities then get_live_context before compose; "
                         "validate_config before run_workflow."
+                        " " + _WORKSPACE_GUIDANCE
                     ),
                 },
             )
@@ -2576,6 +2649,18 @@ class HextileMcpServer:
                 raise HextileClientError("Shader proposal cannot import, delete, or consume", kind="other")
         validate_shader_proposal(args)
         return self._shader_ticket_identity(self.client.propose_shader(args))
+
+    def _open_shader_workspace(self, args: dict[str, Any]) -> Any:
+        validate_shader_workspace("open", args)
+        return self.client.open_shader_workspace(args)
+
+    def _register_shader_update(self, args: dict[str, Any]) -> Any:
+        validate_shader_workspace("register", args)
+        return self.client.register_shader_update(args)
+
+    def _get_shader_update(self, args: dict[str, Any]) -> Any:
+        validate_shader_workspace("get", args)
+        return self.client.get_shader_update(args)
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

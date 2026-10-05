@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import socket
 import uuid
 from contextlib import contextmanager
@@ -45,6 +46,69 @@ _ERROR_BODY_SNIPPET = 800
 _REQUEST_HEADERS: ContextVar[Mapping[str, str]] = ContextVar(
     "hextile_request_headers", default={}
 )
+
+_WORKSPACE_HANDLE = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+_WORKSPACE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_WORKSPACE_SUFFIX = re.compile(r"[1-9][0-9]{0,15}\Z")
+MAX_WORKSPACE_GENERATION = 2**53 - 1
+
+
+def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
+    """Closed transport admission; APP owns grants, replay and saved-base checks."""
+    def refuse(message: str = "Expected closed Shader workspace arguments") -> None:
+        raise HextileClientError(message, kind="other", status_code=422)
+
+    def text(value: Any, maximum: int = 256) -> bool:
+        return type(value) is str and 1 <= len(value) <= maximum
+
+    def digest(value: Any) -> bool:
+        return type(value) is str and _WORKSPACE_DIGEST.fullmatch(value) is not None
+
+    if not isinstance(args, Mapping):
+        refuse()
+    if operation == "open":
+        required = {"shader", "project_context_witness", "expected_working_revision",
+                    "expected_document_hash", "expected_source_hash", "studio_surface_id"}
+        if not required <= args.keys() or args.keys() - required - {"existing_workspace"}:
+            refuse()
+        shader = args["shader"]
+        if (type(shader) is not dict or set(shader) != {"origin", "shaderId"}
+                or shader["origin"] != "project" or not text(shader["shaderId"], 128)
+                or re.fullmatch(r"[A-Za-z0-9_-]+", shader["shaderId"]) is None
+                or not text(args["project_context_witness"]) or not text(args["studio_surface_id"])
+                or type(args["expected_working_revision"]) is not int or args["expected_working_revision"] < 1
+                or not digest(args["expected_document_hash"]) or not digest(args["expected_source_hash"])):
+            refuse()
+        if "existing_workspace" in args:
+            adopt = args["existing_workspace"]
+            if (type(adopt) is not dict or set(adopt) != {"action", "expected_content_digest"}
+                    or adopt["action"] != "adopt" or not digest(adopt["expected_content_digest"])):
+                refuse()
+        return
+    required = {"handle", "change_id", "expected_generation", "content_digest"} if operation == "register" else {"handle", "change_id", "project_context_witness"}
+    if operation not in {"register", "get"} or set(args) != required:
+        refuse()
+    handle, change_id = args["handle"], args["change_id"]
+    if type(handle) is not str or _WORKSPACE_HANDLE.fullmatch(handle) is None:
+        refuse("Workspace handle must be opaque ASCII of at most 64 characters")
+    # Bound the string and decimal before integer conversion, including namespace.
+    if type(change_id) is not str or len(change_id) > 81 or not change_id.startswith(handle + ":"):
+        suffix = ""
+    else:
+        suffix = change_id[len(handle) + 1:]
+    if _WORKSPACE_SUFFIX.fullmatch(suffix) is None or int(suffix) > MAX_WORKSPACE_GENERATION:
+        raise HextileClientError("generation_conflict: use <handle>:<positive canonical generation>",
+                                 kind="http", status_code=409,
+                                 receipt={"code": "generation_conflict"})
+    if operation == "register":
+        if (type(args["expected_generation"]) is not int
+                or not 0 <= args["expected_generation"] < MAX_WORKSPACE_GENERATION
+                or not digest(args["content_digest"])):
+            refuse()
+        # APP compares suffix to expected_generation+1 after checking retained replay,
+        # so altered retained inputs keep their authoritative idempotency_conflict.
+    elif not text(args["project_context_witness"]):
+        refuse()
 
 
 def _layer_transport_unknown(exc: BaseException) -> bool:
@@ -210,7 +274,7 @@ class Client:
             snippet = ""
             try:
                 # Hotkeys has bounded structured conflict details, not a log snippet.
-                limit = 64 * 1024 if path == "/api/agent/hotkeys/requests" else _ERROR_BODY_SNIPPET
+                limit = 64 * 1024 if path == "/api/agent/hotkeys/requests" or path.startswith("/api/agent/shader-workspaces/") else _ERROR_BODY_SNIPPET
                 snippet = (exc.read(limit) or b"").decode(
                     "utf-8", "replace"
                 )
@@ -689,6 +753,61 @@ class Client:
             dict(body),
             headers={"X-Hextile-Agent": "mcp"},
         )
+
+    def _shader_workspace_request(self, method: str, path: str, body: Optional[Mapping[str, Any]] = None,
+                                  *, params: Optional[Mapping[str, Any]] = None) -> Any:
+        """Proxy once. An uncertain reply never becomes a receipt or automatic retry."""
+        try:
+            return self.request_json(method, path, body, params=params,
+                                     timeout=15.0 if path.endswith("/open") else None,
+                                     headers={"X-Hextile-Agent": "mcp"})
+        except http.client.HTTPException as exc:
+            raise HextileClientError("Shader workspace outcome unknown; rediscover current authority before retrying.",
+                                     kind="workspace_outcome_unknown") from exc
+        except HextileClientError as exc:
+            if exc.kind == "other" and exc.status_code is not None and 200 <= exc.status_code < 300:
+                raise HextileClientError("Shader workspace acknowledgement unknown; rediscover current authority before retrying.",
+                                         kind="workspace_outcome_unknown", status_code=exc.status_code) from exc
+            try:
+                detail = json.loads(exc.body or "{}").get("detail")
+            except (ValueError, AttributeError):
+                detail = None
+            if isinstance(detail, dict):
+                exc.receipt = detail
+            if exc.status_code == 404 and detail == "Not Found":
+                raise HextileClientError("Upgrade 360 Hextile to a version with Shader workspaces, then retry.",
+                                         kind="upgrade", status_code=404, body=exc.body) from exc
+            raise
+
+    def open_shader_workspace(self, body: Mapping[str, Any]) -> Any:
+        validate_shader_workspace("open", body)
+        result = self._shader_workspace_request("POST", "/api/agent/shader-workspaces/open", dict(body))
+        if (not isinstance(result, dict) or type(result.get("handle")) is not str
+                or _WORKSPACE_HANDLE.fullmatch(result["handle"]) is None
+                or type(result.get("generation")) is not int or not 0 <= result["generation"] <= MAX_WORKSPACE_GENERATION
+                or type(result.get("content_digest")) is not str or _WORKSPACE_DIGEST.fullmatch(result["content_digest"]) is None
+                or result.get("shader") != body["shader"]
+                or result.get("project_context_witness") != body["project_context_witness"]
+                or result.get("studio_surface_id") != body["studio_surface_id"]
+                or result.get("attachment_state", "attached") != "attached"
+                or type(result.get("files")) is not dict or set(result["files"]) != {"source_path", "authoring_path"}
+                or any(type(value) is not str or not value for value in result["files"].values())):
+            raise HextileClientError("Shader workspace acknowledgement unknown; rediscover or make one identical open retry. No paths were released.",
+                                     kind="workspace_outcome_unknown")
+        return result
+
+    def register_shader_update(self, args: Mapping[str, Any]) -> Any:
+        validate_shader_workspace("register", args)
+        handle = urllib.parse.quote(args["handle"], safe="")
+        body = {key: args[key] for key in ("change_id", "expected_generation", "content_digest")}
+        return self._shader_workspace_request("POST", f"/api/agent/shader-workspaces/{handle}/updates", body)
+
+    def get_shader_update(self, args: Mapping[str, Any]) -> Any:
+        validate_shader_workspace("get", args)
+        handle = urllib.parse.quote(args["handle"], safe="")
+        change_id = urllib.parse.quote(args["change_id"], safe="")
+        return self._shader_workspace_request("GET", f"/api/agent/shader-workspaces/{handle}/updates/{change_id}",
+                                              params={"project_context_witness": args["project_context_witness"]})
 
     def get_live_context(
         self,
