@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import ast
 import http.client
+import hashlib
 import io
 import re
 import urllib.error
@@ -314,6 +315,8 @@ def test_workspace_requests_validate_with_live_app_closed_models() -> None:
     for name in names:
         namespace[name].model_rebuild(_types_namespace=namespace)
     for model, body in ((namespace["OpenIn"], _workspace_open()),
+                        (namespace["OpenIn"], {**_workspace_open(), "workspace_schema": 2}),
+                        (namespace["OpenIn"], _workspace_open_v2()),
                         (namespace["RegisterIn"], {key: value for key, value in _workspace_register().items() if key != "handle"})):
         validated = model.model_validate(body).model_dump(exclude_unset=True)
         assert validated == body
@@ -467,6 +470,159 @@ def test_workspace_missing_route_is_actionable_without_rewriting_old_peer_error(
         Client(opener=opener).open_shader_workspace(_workspace_open())
     assert caught.value.kind == "upgrade" and "Upgrade 360 Hextile" in str(caught.value)
     assert caught.value.body == '{"detail":"Not Found"}'
+
+
+def _workspace_open_v2() -> dict[str, Any]:
+    return {key: value for key, value in {**_workspace_open(), "workspace_schema": 2}.items()
+            if key not in {"expected_working_revision", "expected_document_hash", "expected_source_hash"}}
+
+
+def _workspace_attachment_v2(base: dict[str, Any]) -> dict[str, Any]:
+    return {**_workspace_attachment(), "workspace_schema": 2, "schema": 2, "base": base,
+            "workspace_root": "D:/project/workspace", "authoring_path": "D:/project/workspace/authoring.json",
+            "files": [{"path": "lib/noise.glsl", "native_path": "D:/project/workspace/lib/noise.glsl"},
+                      {"path": "source.glsl", "native_path": "D:/project/workspace/source.glsl"}]}
+
+
+@pytest.mark.parametrize("base", [
+    {"kind": "saved", "working_revision": 9, "document_hash": "sha256:" + "ab" * 32, "source_hash": "sha256:" + "cd" * 32},
+    {"kind": "unaccepted", "authoring_digest": "sha256:" + "12" * 32},
+])
+def test_workspace_v2_open_preserves_exact_server_base_and_files(base: dict[str, Any]) -> None:
+    attachment = _workspace_attachment_v2(base)
+    seen = []
+
+    def opener(req: Any, timeout: Any = None) -> _WorkspaceResponse:
+        seen.append(json.loads(req.data))
+        return _WorkspaceResponse(attachment)
+
+    args = _workspace_open_v2() if base["kind"] == "unaccepted" else {**_workspace_open(), "workspace_schema": 2}
+    jsonschema.validate(args, _schema("open_shader_workspace")["inputSchema"])
+    assert HextileMcpServer(client=Client(opener=opener))._open_shader_workspace(args) == attachment
+    assert seen == [args]
+
+
+@pytest.mark.parametrize("patch", [{"workspace_schema": 1}, {"workspace_schema": True}, {"workspace_schema": None},
+                                  {"workspace_schema": 3}, {"expected_source_hash": "sha256:" + "cd" * 32}])
+def test_workspace_v2_open_closed_negotiation(patch: dict[str, Any]) -> None:
+    args = {**_workspace_open_v2(), **patch}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(args, _schema("open_shader_workspace")["inputSchema"])
+    with pytest.raises(HextileClientError):
+        Client(opener=lambda *_a, **_k: pytest.fail("no HTTP")).open_shader_workspace(args)
+
+
+@pytest.mark.parametrize("flag", [None, 0, 1, "true", {}, []])
+def test_workspace_located_flag_is_closed_boolean(flag: Any) -> None:
+    args = {"handle": "sw_test", "change_id": "sw_test:1", "project_context_witness": "wit", "include_source_diagnostics": flag}
+    schema = _schema("get_shader_update")["inputSchema"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["include_source_diagnostics"] == {"type": "boolean", "default": False}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(args, schema)
+    with pytest.raises(HextileClientError):
+        HextileMcpServer(client=Client(opener=lambda *_a, **_k: pytest.fail("no HTTP")))._get_shader_update(args)
+
+
+@pytest.mark.parametrize("flag", [None, False, True])
+def test_workspace_located_get_exact_url_and_granted_ack(flag: Any) -> None:
+    args = {"handle": "sw_test", "change_id": "sw_test:1", "project_context_witness": "wit"}
+    if flag is not None:
+        args["include_source_diagnostics"] = flag
+    receipt = _workspace_receipt()
+    if flag is True:
+        receipt["source_diagnostics"] = [{"phase": "compile", "severity": "error", "code": "compile",
+                                          "message": "Unknown symbol", "logical_file": "lib/noise.glsl", "full_source_line": 4}]
+    seen = []
+
+    def opener(req: Any, timeout: Any = None) -> _WorkspaceResponse:
+        seen.append(req.full_url)
+        return _WorkspaceResponse(receipt)
+
+    jsonschema.validate(args, _schema("get_shader_update")["inputSchema"])
+    assert HextileMcpServer(client=Client(opener=opener))._get_shader_update(args) == receipt
+    expected = "http://127.0.0.1:8000/api/agent/shader-workspaces/sw_test/updates/sw_test%3A1?project_context_witness=wit"
+    assert seen == [expected + ("&include_source_diagnostics=true" if flag is True else "")]
+    assert not {"files", "source", "complete_candidate", "ticket_id"} & receipt.keys()
+
+
+@pytest.mark.parametrize("status,code,witness", [(403, "authority", "wit"), (409, "generation_conflict", "wit"),
+                                                (409, "context_conflict", "wrong"), (409, "check_timeout", "wit")])
+def test_workspace_located_get_preserves_revoked_stale_witness_deadline_refusal(status: int, code: str, witness: str) -> None:
+    detail = {"code": code, "message": "Source diagnostic read refused", "recovery": "Rediscover current authority"}
+    seen = []
+
+    def opener(req: Any, timeout: Any = None) -> Any:
+        seen.append(req)
+        raise urllib.error.HTTPError(req.full_url, status, "refused", None, io.BytesIO(json.dumps({"detail": detail}).encode()))
+
+    with pytest.raises(HextileClientError) as caught:
+        HextileMcpServer(client=Client(opener=opener))._get_shader_update({"handle": "sw_test", "change_id": "sw_test:1",
+            "project_context_witness": witness, "include_source_diagnostics": True})
+    assert caught.value.status_code == status and caught.value.receipt == detail
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("reply", [_workspace_receipt(), {**_workspace_receipt(), "source_diagnostics": None}])
+def test_workspace_located_get_unsupported_legacy_200_refuses_without_downgrade(reply: dict[str, Any]) -> None:
+    seen = []
+
+    def opener(req: Any, timeout: Any = None) -> _WorkspaceResponse:
+        seen.append(req.full_url)
+        return _WorkspaceResponse(reply)
+
+    with pytest.raises(HextileClientError) as caught:
+        Client(opener=opener).get_shader_update({"handle": "sw_test", "change_id": "sw_test:1", "project_context_witness": "wit",
+                                              "include_source_diagnostics": True})
+    assert caught.value.kind == "upgrade" and "Upgrade" in str(caught.value) and "reconnect" in str(caught.value)
+    assert len(seen) == 1 and seen[0].endswith("&include_source_diagnostics=true")
+
+
+def test_workspace_v2_register_granted_diagnostics_repair_keeps_full_set_identity() -> None:
+    # Transport fixture: APP alone owns the grant, frozen candidate and stale classifier.
+    current = _workspace_receipt()
+    seen = []
+
+    def opener(req: Any, timeout: Any = None) -> _WorkspaceResponse:
+        nonlocal current
+        seen.append(req)
+        if req.get_method() == "POST":
+            body = json.loads(req.data)
+            current = {**current, **body, "generation": body["expected_generation"] + 1,
+                       "candidate_id": "candidate-" + body["change_id"]}
+            return _WorkspaceResponse(current)
+        if "sw_test%3A1?" in req.full_url and current["generation"] == 2:
+            raise urllib.error.HTTPError(req.full_url, 409, "stale", None,
+                                         io.BytesIO(b'{"detail":{"code":"generation_conflict"}}'))
+        return _WorkspaceResponse({**current, "source_diagnostics": []})
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    # Include an unused declared helper: even its edit changes the raw full-set digest.
+    authoring = b'{"entry":"source.glsl","source_files":["lib/unused.glsl","source.glsl"]}'
+    members = {"source.glsl": b"void main() {}", "lib/unused.glsl": b"float unused = broken;"}
+
+    def digest() -> str:
+        framed = b"360hextile.shader-workspace.v2\0" + len(authoring).to_bytes(8, "big") + authoring + len(members).to_bytes(4, "big")
+        for path, raw in sorted(members.items(), key=lambda pair: pair[0].encode("utf-8")):
+            name = path.encode("utf-8")
+            framed += len(name).to_bytes(4, "big") + name + len(raw).to_bytes(8, "big") + raw
+        return "sha256:" + hashlib.sha256(framed).hexdigest()
+
+    first = {**_workspace_register(), "content_digest": digest()}
+    assert server._register_shader_update(first)["content_digest"] == first["content_digest"]
+    get = {"handle": "sw_test", "change_id": "sw_test:1", "project_context_witness": "wit", "include_source_diagnostics": True}
+    assert server._get_shader_update(get)["source_diagnostics"] == []
+    members["lib/unused.glsl"] = b"float unused = 0.0;"
+    repaired = {**first, "change_id": "sw_test:2", "expected_generation": 1, "content_digest": digest()}
+    assert first["content_digest"] != repaired["content_digest"]
+    receipt = server._register_shader_update(repaired)
+    assert receipt["content_digest"] == repaired["content_digest"] and receipt["candidate_id"] == "candidate-sw_test:2"
+    with pytest.raises(HextileClientError) as caught:
+        server._get_shader_update(get)
+    assert caught.value.receipt == {"code": "generation_conflict"}
+    assert server._get_shader_update({**get, "change_id": "sw_test:2"})["content_digest"] == repaired["content_digest"]
+    assert [json.loads(req.data) for req in seen if req.get_method() == "POST"] == [
+        {key: value for key, value in args.items() if key != "handle"} for args in (first, repaired)]
 
 
 def _playable_recipe() -> tuple[list[str], dict[str, Any]]:

@@ -69,15 +69,21 @@ def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
     if operation == "open":
         required = {"shader", "project_context_witness", "expected_working_revision",
                     "expected_document_hash", "expected_source_hash", "studio_surface_id"}
-        if not required <= args.keys() or args.keys() - required - {"existing_workspace"}:
+        base = {"expected_working_revision", "expected_document_hash", "expected_source_hash"}
+        supplied = base & args.keys()
+        if (not required - base <= args.keys()
+                or args.keys() - required - {"existing_workspace", "workspace_schema"}
+                or ("workspace_schema" in args and (type(args["workspace_schema"]) is not int or args["workspace_schema"] != 2))
+                or (supplied and supplied != base)
+                or (args.get("workspace_schema") != 2 and supplied != base)):
             refuse()
         shader = args["shader"]
         if (type(shader) is not dict or set(shader) != {"origin", "shaderId"}
                 or shader["origin"] != "project" or not text(shader["shaderId"], 128)
                 or re.fullmatch(r"[A-Za-z0-9_-]+", shader["shaderId"]) is None
                 or not text(args["project_context_witness"]) or not text(args["studio_surface_id"])
-                or type(args["expected_working_revision"]) is not int or args["expected_working_revision"] < 1
-                or not digest(args["expected_document_hash"]) or not digest(args["expected_source_hash"])):
+                or (supplied and (type(args["expected_working_revision"]) is not int or args["expected_working_revision"] < 1
+                                 or not digest(args["expected_document_hash"]) or not digest(args["expected_source_hash"])))):
             refuse()
         if "existing_workspace" in args:
             adopt = args["existing_workspace"]
@@ -86,7 +92,10 @@ def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
                 refuse()
         return
     required = {"handle", "change_id", "expected_generation", "content_digest"} if operation == "register" else {"handle", "change_id", "project_context_witness"}
-    if operation not in {"register", "get"} or set(args) != required:
+    optional = {"include_source_diagnostics"} if operation == "get" else set()
+    if (operation not in {"register", "get"} or not required <= args.keys()
+            or args.keys() - required - optional
+            or ("include_source_diagnostics" in args and type(args["include_source_diagnostics"]) is not bool)):
         refuse()
     handle, change_id = args["handle"], args["change_id"]
     if type(handle) is not str or _WORKSPACE_HANDLE.fullmatch(handle) is None:
@@ -790,10 +799,19 @@ class Client:
                 or result.get("project_context_witness") != body["project_context_witness"]
                 or result.get("studio_surface_id") != body["studio_surface_id"]
                 or result.get("attachment_state", "attached") != "attached"
-                or type(result.get("files")) is not dict or set(result["files"]) != {"source_path", "authoring_path"}
-                or any(type(value) is not str or not value for value in result["files"].values())):
+                or (body.get("workspace_schema") != 2 and (
+                    type(result.get("files")) is not dict or set(result["files"]) != {"source_path", "authoring_path"}
+                    or any(type(value) is not str or not value for value in result["files"].values())))):
             raise HextileClientError("Shader workspace acknowledgement unknown; rediscover or make one identical open retry. No paths were released.",
                                      kind="workspace_outcome_unknown")
+        if body.get("workspace_schema") == 2 and (
+                result.get("workspace_schema") != 2 or type(result.get("files")) is not list
+                or not result["files"] or len(result["files"]) > 32
+                or any(type(row) is not dict or set(row) != {"path", "native_path"}
+                       or any(type(value) is not str or not value for value in row.values()) for row in result["files"])
+                or any(type(result.get(key)) is not str or not result[key] for key in ("workspace_root", "authoring_path"))):
+            raise HextileClientError("Upgrade 360 Hextile and reconnect for workspace_schema 2; no workspace paths were released.",
+                                     kind="upgrade")
         return result
 
     def register_shader_update(self, args: Mapping[str, Any]) -> Any:
@@ -816,8 +834,15 @@ class Client:
         validate_shader_workspace("get", args)
         handle = urllib.parse.quote(args["handle"], safe="")
         change_id = urllib.parse.quote(args["change_id"], safe="")
-        return self._shader_workspace_request("GET", f"/api/agent/shader-workspaces/{handle}/updates/{change_id}",
-                                              params={"project_context_witness": args["project_context_witness"]})
+        params = {"project_context_witness": args["project_context_witness"]}
+        if args.get("include_source_diagnostics") is True:
+            params["include_source_diagnostics"] = "true"
+        result = self._shader_workspace_request("GET", f"/api/agent/shader-workspaces/{handle}/updates/{change_id}", params=params)
+        if args.get("include_source_diagnostics") is True and (
+                not isinstance(result, dict) or type(result.get("source_diagnostics")) is not list):
+            raise HextileClientError("Upgrade 360 Hextile and reconnect for granted source diagnostics; this APP did not acknowledge support.",
+                                     kind="upgrade")
+        return result
 
     def get_live_context(
         self,

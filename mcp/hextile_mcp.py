@@ -403,10 +403,18 @@ _WORKSPACE_CHANGE = {"type": "string", "maxLength": 81,
 _WORKSPACE_GUIDANCE = (
     "Discover the three workspace tools via MCP tools/list; get_capabilities remains the APP workflow handshake. "
     "Read get_live_context.current_surface and existing Follow/grants; presence alone grants nothing. "
+    "Omit workspace_schema for the unchanged v1 pair; request workspace_schema:2 for the complete portable manifest. "
+    "V2 returns server-owned saved/unaccepted base, root and ordered source paths; preserve these exact identities. "
+    "Use strict UTF-8 confined relative GLSL paths (<=256 UTF-8 bytes), no .git, native/absolute paths or escapes. "
+    "Declare every source in authoring.json: <=32 GLSL files, <=64 KiB aggregate raw and expanded source, include depth <=16. "
+    "V2 registers the full declared set, including unused modules, Looks and provenance: follow APP's raw-byte v2 digest instructions. "
+    "Never reuse the v1 pair digest for v2. Originals/resources are verified separately; unlisted files confer nothing. "
+    "get_shader_update include_source_diagnostics:true requests bounded logical locations under the current source grant, witness and candidate. "
+    "Omitted/false keeps the source-free legacy receipt. Missing support requires upgrade/reconnect, never downgrade. "
     "Open requires a clean Project Shader, Follow and whole-source read/propose authority. "
-    "Only acknowledged open returns the two files after APP acquires the mounted readonly/autosave hold. "
-    "Edit source.glsl (64 KiB) and authoring.json (2 MiB), with a complete derived document <= 2 MiB. "
-    "Keep sidecar base immutable. Digest raw bytes without newline/JSON normalization: sha256: + SHA256("
+    "Only acknowledged open returns files after APP acquires the mounted readonly/autosave hold. "
+    "V1 edits source.glsl (64 KiB) and authoring.json (2 MiB), with a complete derived document <= 2 MiB. "
+    "Keep v1 sidecar base immutable. V1 digest raw bytes without newline/JSON normalization: sha256: + SHA256("
     "b'360hextile.shader-workspace.v1\\0' + uint64be(len(source)) + source + uint64be(len(authoring)) + authoring). "
     "Register automatically checks the frozen candidate; it never wakes idle intelligence or synthesizes Apply. "
     "Poll prepare/compile/preview/presentation/save, attachment_state, check_attempt and candidate-bound diagnostics; "
@@ -1750,13 +1758,19 @@ TOOLS: list[dict[str, Any]] = [
          "expected_document_hash": _WORKSPACE_DIGEST, "expected_source_hash": _WORKSPACE_DIGEST,
          "studio_surface_id": _WORKSPACE_WITNESS,
          "existing_workspace": _shader_closed({"action": {"const": "adopt"}, "expected_content_digest": _WORKSPACE_DIGEST}),
-     }, ("existing_workspace",)), "annotations": _annotations("open_shader_workspace")},
+         "workspace_schema": {"type": "integer", "const": 2},
+     }, ("existing_workspace", "workspace_schema", "expected_working_revision", "expected_document_hash", "expected_source_hash")) | {
+         "anyOf": [{"required": ["expected_working_revision", "expected_document_hash", "expected_source_hash"]},
+                   {"required": ["workspace_schema"], "not": {"anyOf": [
+                       {"required": [key]} for key in ("expected_working_revision", "expected_document_hash", "expected_source_hash")]}}],
+     }, "annotations": _annotations("open_shader_workspace")},
     _tool_def("register_shader_update",
         "Register native file bytes once for automatic APP prepare/compile/preview. "
         "change_id is <handle>:<expected_generation+1>, never an arbitrary ID. "
         "Exact retained replay returns its receipt after generation advances; changed retained inputs refuse idempotency_conflict, "
         "expired historical receipts stay 410. Do not send GLSL, paths or Apply authority. "
-        "Use the raw-byte digest described by open_shader_workspace; preserve returned diagnostics and check_attempt.",
+        "Use the negotiated raw-byte full-set digest described by APP open instructions; include unused modules and manifest changes. "
+        "Preserve exact candidate/digest/generation and check_attempt; new registration invalidates old located diagnostics.",
         {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE,
          "expected_generation": {"type": "integer", "minimum": 0, "maximum": 2**53 - 2},
          "content_digest": _WORKSPACE_DIGEST},
@@ -1765,9 +1779,13 @@ TOOLS: list[dict[str, Any]] = [
         "Read one exact authorized workspace receipt, including attachment_state, check_attempt, "
         "prepare/compile/preview/presentation/save and bounded diagnostics/raw_log/reason. "
         "Pass the Project witness returned by open; no files or source are returned. "
+        "Optional include_source_diagnostics defaults false; explicit true requires APP-validated current source grant/witness/candidate "
+        "and acknowledges bounded logical source_diagnostics (64 rows, 2 KiB messages), never code, native paths or Apply authority. "
+        "Unsupported APP requires upgrade/reconnect; do not silently downgrade. "
         "Honor next_poll_ms and check_deadline_at; polling never extends the attempt or saves. "
         "410 receipt_expired/workspace_expired remains terminal; rediscover current authority without deleting files.",
-        {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE, "project_context_witness": _WORKSPACE_WITNESS},
+        {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE, "project_context_witness": _WORKSPACE_WITNESS,
+         "include_source_diagnostics": {"type": "boolean", "default": False}},
         required=["handle", "change_id", "project_context_witness"]),
 ]
 
