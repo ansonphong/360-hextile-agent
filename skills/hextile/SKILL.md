@@ -122,7 +122,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
 | `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
 | `open_shader_workspace` | Acknowledge exact Project Shader attachment; v1 returns two native files, negotiated v2 returns the declared source set and metadata path. Follow installed `360-hextile` | **yes** |
-| `register_shader_update` | Register an exact two-file digest for automatic APP Prepare/compile checks; never Apply | **yes** |
+| `register_shader_update` | Register the acknowledged format-specific raw digest: v1 pair or complete v2 declared set, including unused helpers; automatic APP Prepare/compile checks, never Apply | **yes** |
 | `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
 
 ### Selection guide

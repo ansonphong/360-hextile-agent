@@ -146,9 +146,9 @@ For `from_template`, use the listed `template_id` and `face_index`; for `from_ra
 
 ## Recipe I — Playable Shaders: fly source
 
-Use the installed `360-hextile` skill's attested two-file procedure. Start from a clean Project Shader, observe acknowledged `available=true` and executable `conventions/1`, then use a fully resolved supported definition in `authoring.json`. A preset ID is not a definition: use shipped resolved bytes already in the document or supplied by the user, or already authorized current Project-derived bytes. Never fetch an arbitrary Project profile or require manual preset Apply to complete agent authoring.
+Use the installed `360-hextile` skill's attested native-file procedure: v1 has a source/sidecar pair; v2 has acknowledged schema-2 metadata and a complete declared source set, including an unaccepted clone with no saved revision. Observe acknowledged `available=true` and executable `conventions/1`, then use a fully resolved supported definition in the existing `authoring.json` extension. Preserve the v2 closed metadata keys and inventories; do not add a v1 `base` field to v2. A preset ID is not a definition: use shipped resolved bytes already in the document or supplied by the user, or already authorized current Project-derived bytes. Never fetch an arbitrary Project profile or require manual preset Apply to complete agent authoring.
 
-This source matches the shipped fly-fractal example. Keep sidecar `space="direction_360"`, values `{ "fold":1, "hue":0 }`, and sorted `extensions.required_capabilities=["conventions/1"]` alongside the resolved convention. Preserve the acknowledged base, capture defaults, output and unrelated extensions/resources.
+This source matches the shipped fly-fractal example. Keep `space="direction_360"`, values `{ "fold":1, "hue":0 }`, and sorted `extensions.required_capabilities=["conventions/1"]` alongside the resolved convention. Preserve capture defaults, output and unrelated extensions/resources; retain v1's immutable `base`, or v2's closed metadata and full declared inventories without adding a `base`.
 
 ```glsl
 /*@hextile-shader
@@ -190,7 +190,7 @@ Generated signatures: `vec3 hxCameraPosition`, `mat3 hxCameraRotation`, `vec3 hx
 
 ## Recipe J — Playable Shaders: one-prompt Enter BLAST, camera null
 
-“Make it when I press ENTER then we get a blast event” means one complete candidate: parameters are destinations, logical controls are inputs, and an envelope supplies shared shaping. Observe APP `available=true`, executable `conventions/1` AND `modulation/2`, then candidate `execution_ready`; missing declarations on a clean nonconvention base do not mean an unsupported runtime. Use only `source.glsl` plus `authoring.json`, register once and follow the installed skill's bounded Prepare/compile/poll/repair loop. No event callback or new MCP tool is needed.
+“Make it when I press ENTER then we get a blast event” means one complete candidate: parameters are destinations, logical controls are inputs, and an envelope supplies shared shaping. Observe APP `available=true`, executable `conventions/1` AND `modulation/2`, then candidate `execution_ready`; missing declarations on a clean nonconvention base do not mean an unsupported runtime. The GLSL/control example below works through the negotiated workspace: keep v1's pair or v2's full declared source set and schema-2 metadata, register its format-specific raw digest and follow the installed skill's bounded Prepare/compile/poll/repair loop. No event callback or new MCP tool is needed.
 
 Write this source (the shipped camera-null example):
 
@@ -210,7 +210,7 @@ vec4 hxMain(in HxFrag hx) {
 }
 ```
 
-In the acknowledged sidecar keep `kind="360hextile.shader-workspace"`, `schema=1` and its immutable `base`. Set `values={"slice":0,"glow":0}`, keep its capture defaults/output, set `space="direction_360"`, and merge the following complete extension members without deleting unrelated extensions. IDs shown are stable sample IDs; preserve existing IDs on revisions and use distinct valid IDs for new rows.
+Merge the following control payload into the **acknowledged** `authoring.json` without deleting unrelated extensions. In v1 keep `kind="360hextile.shader-workspace"`, `schema=1` and immutable `base`; in v2 keep `schema=2`, `shader_id`, title/tags, entry, complete `source_files`/`look_files`/provenance/original inventories and **no** saved `base`. Set `values={"slice":0,"glow":0}`, keep capture defaults/output and set `space="direction_360"` within that existing format. The JSON block is an extension fragment, not a replacement `authoring.json`. IDs shown are stable sample IDs; preserve existing IDs on revisions and use distinct valid IDs for new rows.
 
 ```json
 {
@@ -252,6 +252,6 @@ Enter → `blast_press` (default-0 gate) → `BLAST` (`kind="envelope"`, `mode="
 
 Attack/Release are finite seconds `[0,60]`. Curve objects have exactly `shape, exponent`; shapes are `linear`, `ease_in`, `ease_out`, `ease_in_out`. Linear uses exponent 1; nonlinear preset default is 2, adjustable independently per stage within `[1,8]`. The example explicitly chooses 20 ms Linear Attack and 400 ms Ease Out Release with exponent 2. Author all settings; omitted fields are not defaults. Envelopes use monotonic interaction time, independent of scene pause and Master Clock BPM/Speed. Retain the default Master Clock object and declaration required by the modulation document; do not invent a separate clock-bit gate for this recipe.
 
-Aliases match ASCII `[A-Za-z][A-Za-z0-9_]{0,31}`, contain no `__`, are unique across channels/modulators and avoid GLSL/host names and source declarations. Modulator IDs are `mod_` plus 24 lowercase hex digits; binding IDs are `binding_` plus 24 lowercase hex digits. An envelope must reference an existing default-0 gate; orphaned inputs, incompatible targets, missing declarations or malformed settings yield real Prepare diagnostics, not a static pass. Preserve schema 2 on revisions; sidecar schema 1 is a separate contract.
+Aliases match ASCII `[A-Za-z][A-Za-z0-9_]{0,31}`, contain no `__`, are unique across channels/modulators and avoid GLSL/host names and source declarations. Modulator IDs are `mod_` plus 24 lowercase hex digits; binding IDs are `binding_` plus 24 lowercase hex digits. An envelope must reference an existing default-0 gate; orphaned inputs, incompatible targets, missing declarations or malformed settings yield real Prepare diagnostics, not a static pass. Preserve modulation schema 2 on revisions; workspace format stays at its acknowledged v1 or v2 schema.
 
 Report an effective Enter shortcut conflict and propose an explicit remap. It is not a compile failure; never press keys, arm Interact, change Hotkeys, set live pose or save Project presets to prove the recipe. Review controls/modulators/parameters/values/code and the exact candidate-bound check states together; human Apply alone saves through APP's checked door. Compilation is not physical input or visual proof. Legacy `propose_shader` and every Copilot Board row must keep convention/envelope bytes and Playable declarations unchanged; only the current attested workspace can first create or revise them. Future admitted INPUT adapters may route MIDI/OSC/gamepad to the same logical gate/evaluator, but those device routes, addresses and live events never belong in these portable files.
