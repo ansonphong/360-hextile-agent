@@ -1015,6 +1015,25 @@ def test_list_runs_sends_lifecycle_query() -> None:
 def test_get_guide_reads_real_markdown() -> None:
     listed = load_guide("index")
     assert set(listed["guides"]) == set(GUIDE_NAMES)
+    guides = {name: load_guide(name)["markdown"] for name in GUIDE_NAMES}
+    assert "workspace_schema:2" in guides["best-practices"]
+    assert "include_source_diagnostics:true" in guides["best-practices"]
+    assert "unused helpers" in guides["best-practices"]
+    assert "mixed legacy Projects" in guides["best-practices"]
+    assert "user's instruction" in guides["best-practices"]
+    assert "accepted snapshot only" in guides["best-practices"]
+    assert "source_files" in guides["recipes"]
+    assert "register a new canonical change ID" in guides["recipes"]
+    assert "only the human Applies" in guides["recipes"]
+    assert "metadata/config" in guides["workflow-schema"]
+    assert "No GLSL bodies belong in durable JSON" in guides["workflow-schema"]
+    assert "source-modules/1" in guides["workflow-schema"]
+    for name in ("gitignore.txt", "gitattributes.txt"):
+        url = f"https://360hextile.com/static/templates/shaders/{name}"
+        assert url in guides["best-practices"]
+        assert url in guides["website-index"]
+    assert "https://360hextile.com/docs/create/shader" in guides["website-index"]
+    assert "https://360hextile.com/docs/user-guide/agent-mode" in guides["website-index"]
     schema = load_guide("workflow-schema")
     body = schema["markdown"]
     assert "HextileConfig" in body

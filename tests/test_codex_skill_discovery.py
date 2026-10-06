@@ -47,6 +47,24 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
                 assert (installed / reference.relative_to(source)).read_bytes() == reference.read_bytes()
     assert not (tmp_path / ".codex" / "skills" / "hextile").exists()
 
+    specialized = (tmp_path / ".agents" / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
+    umbrella = (tmp_path / ".agents" / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
+    assert specialized.startswith("---\nname: 360-hextile\n")
+    assert umbrella.startswith("---\nname: hextile\n")
+    assert "installed `360-hextile`" in umbrella
+    assert "workspace_schema:2" in specialized
+    assert "negotiate v2" in umbrella
+    for body in (specialized, umbrella):
+        assert "source-modules/1" in body
+        assert "https://360hextile.com/docs/create/shader" in body
+        assert "human" in body.lower() and "Apply" in body
+    assert "https://360hextile.com/static/templates/shaders/gitignore.txt" in specialized
+    assert "https://360hextile.com/static/templates/shaders/gitattributes.txt" in specialized
+    assert "only after **every Shader covered**" in specialized
+    assert "Native Git diff/commit/checkout/push runs only on the user's explicit instruction" in specialized
+    assert "never exports dirty workspace bytes or Git HEAD" in specialized
+    assert "shared-file access" in specialized
+
     config = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.hextile]" in config
     assert sys.executable in config
