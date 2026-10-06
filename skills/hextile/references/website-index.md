@@ -7,6 +7,10 @@ Base: `https://360hextile.com/docs/`
 | Topic | URL |
 |-------|-----|
 | Docs home | https://360hextile.com/docs/ |
+| 360 Shaders: complete native files, source grant, review and accepted export | https://360hextile.com/docs/create/shader |
+| Agent Mode: install and observed skill invocation | https://360hextile.com/docs/user-guide/agent-mode |
+| Optional Shader `.gitignore` Save As example | https://360hextile.com/static/templates/shaders/gitignore.txt |
+| Optional Shader `.gitattributes` Save As example | https://360hextile.com/static/templates/shaders/gitattributes.txt |
 | Creating renders | https://360hextile.com/docs/user-guide/creating-renders |
 | Multipass | https://360hextile.com/docs/user-guide/multi-pass |
 | Presets | https://360hextile.com/docs/user-guide/presets |
@@ -26,3 +30,5 @@ Base: `https://360hextile.com/docs/`
 | Upscaling | https://360hextile.com/docs/modules/upscaling |
 
 If a fetch fails, stay on bundled `get_guide` pages. Do not invent other `/docs/automation` URLs.
+
+The two template URLs are intended WWW delivery targets; check that the deployed download exists before telling a user to fetch it. Use the wildcard ignore policy only after all covered Shaders have complete portable workspace copies. Native Git needs the user's explicit instruction, and neither a guide nor a URL proves current APP or installed-host capability.

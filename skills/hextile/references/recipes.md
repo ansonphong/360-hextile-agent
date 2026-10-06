@@ -1,5 +1,13 @@
 # Recipes
 
+## Shader file session — complete portable source set
+
+Invoke the installed `360-hextile` skill through the host's observed picker. Verify actual `tools/list`, APP Follow and whole-source grant, then request `open_shader_workspace(workspace_schema=2, ...)` using the live Shader/surface/Project witness. Require a v2 acknowledgement and native access to the same files; if v2 or `source-modules/1` execution is unavailable, report upgrade/reconnect/unsupported rather than describing this as a working compiled session. Legacy v1 still uses the two acknowledged files and its own digest.
+
+In `workspace/authoring.json`, keep the acknowledged schema-2 metadata and declare `source.glsl` plus every helper logical path in `source_files`; keep actual GLSL only in those `.glsl` files. For example, root `source.glsl` may include `#include "lib/noise.glsl"` at file scope, with `workspace/lib/noise.glsl` declared and authored as a helper. Include paths are relative to the including file, depth-first/include-once in one namespace. A missing target, cycle or bad path needs a real located diagnostic. Keep declared but unused helpers in the full-set digest, bundle and Git worktree. Track Looks, provenance, `workspace/resources/` PNGs and every referenced sequence frame rather than one preview frame.
+
+Read the acknowledged v2 digest framing and compare it to the open receipt before editing. After native edits, hash raw `authoring.json` plus all declared source/Look/provenance members in the prescribed UTF-8 path order without newline or JSON normalization. `register_shader_update` freezes this complete candidate; `get_shader_update(..., include_source_diagnostics=true)` can return bounded logical locations under current grant/witness/candidate. Repair a located helper, recompute the whole digest and register a new canonical change ID. Review the complete candidate and check states with the human; only the human Applies. The agent never uses a Git commit, checkout or `.hexshader` export as a substitute for registration. Human detail: https://360hextile.com/docs/create/shader.
+
 ## A — Prompt-only scout from a builtin
 
 ```

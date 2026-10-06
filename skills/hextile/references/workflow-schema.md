@@ -33,3 +33,7 @@ Retired render-time `input.source` values (`pattern`, `360_lora`, `solid_color`,
 ## Builtin starting points
 
 `quick-scout` (fast 2K / `sd21`), `progressive-build`, `structure-first`, `bloom-from-noise`, `grand-remaster`, `painters-pass`.
+
+## Separate Shader workspace format
+
+`authoring.json` is **not** a `.hextile.json` Workflow. A negotiated `workspace_schema:2` Project Shader stores metadata/config and complete path inventories in `workspace/authoring.json`; root `workspace/source.glsl` and arbitrary declared relative `.glsl` helpers hold the actual code. No GLSL bodies belong in durable JSON. The ordered full source set, including unused helpers, and declared Looks/provenance are raw-byte registered using the v2 digest returned in APP open instructions; resources/originals are verified separately. Do not use the v1 source/authoring pair digest for v2 or serialize transient `source_modules` API text into the portable manifest. `source-modules/1` must be executable on the running APP before promising compilation, independently of format negotiation. See the installed `360-hextile` skill and https://360hextile.com/docs/create/shader.
