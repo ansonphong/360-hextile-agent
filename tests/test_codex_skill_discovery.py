@@ -288,5 +288,5 @@ def test_fragment_tracks_legacy_hub_and_source_versions_agree(isolated_generated
         if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "SERVER_VERSION" for target in node.targets)
     )
-    assert INSTALL.PACKAGE_VERSION == manifest["version"] == server_version == "0.5.2"
+    assert INSTALL.PACKAGE_VERSION == manifest["version"] == server_version == "0.5.3"
     assert f"**v{INSTALL.PACKAGE_VERSION}**" in (ROOT / "README.md").read_text(encoding="utf-8")

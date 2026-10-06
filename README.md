@@ -1,6 +1,6 @@
 # 360-hextile-agent
 
-**v0.5.2**
+**v0.5.3**
 
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
