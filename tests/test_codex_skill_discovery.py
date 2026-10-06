@@ -83,6 +83,21 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
     assert "Native Git diff/commit/checkout/push runs only on the user's explicit instruction" in specialized
     assert "never exports dirty workspace bytes or Git HEAD" in specialized
     assert "shared-file access" in specialized
+    assert "unaccepted v2 clone has no saved revision or `shader.json`" in specialized
+    assert "do not call that saved-context read or invent a revision" in specialized
+    assert "Repair only acknowledged editable members" in specialized
+    assert "including unused helpers in v2" in specialized
+    assert "v2 `authoring.json` has no saved-base field" in specialized
+    assert "v1 pair or complete v2 declared set" in umbrella
+
+    references = tmp_path / ".agents" / "skills" / "hextile" / "references"
+    recipes = (references / "recipes.md").read_text(encoding="utf-8")
+    practices = (references / "best-practices.md").read_text(encoding="utf-8")
+    assert "unaccepted clone with no saved revision" in recipes
+    assert "The JSON block is an extension fragment, not a replacement `authoring.json`" in recipes
+    assert "v2's closed metadata and full declared inventories without adding a `base`" in recipes
+    assert "v2's complete metadata/inventory" in practices
+    assert "workspace v1's sidecar schema 1 and v2's metadata schema 2" in practices
 
     config = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.hextile]" in config
