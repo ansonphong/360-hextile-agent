@@ -14,7 +14,7 @@ Accept the user's requested Shader change as natural language. Resolve identity 
 ## Prerequisites
 
 - The installed `hextile` MCP connector must work with the running localhost APP, and the host must have native read/write access to the same physical Project/worktree files. MCP connectivity alone does not prove shared-file access.
-- A Project Shader must be open in Shader Workshop, with an attachable draft (saved or an unaccepted v2 clone), MCP Follow ON and a current whole-asset grant: `scope="asset"`, `source_read=true`, `propose=true`, with no selection-only restriction. Source disclosure and ingestion require this authority; human Apply has its own authority check.
+- A Project Shader or a My Library Shader must be open in Shader Workshop (a Builtin Shader must be duplicated first), with an attachable draft (saved or an unaccepted v2 clone), MCP Follow ON and a current whole-asset grant: `scope="asset"`, `source_read=true`, `propose=true`, with no selection-only restriction. Source disclosure and ingestion require this authority; human Apply has its own authority check.
 - Invoke the installed skill named `shader` using the host's observed skill picker/command. Claude plugin invocation may have a namespace rather than bare `/shader` (Claude: `/360-hextile:shader`). Check installed Codex and Grok syntax; folder/frontmatter names do not prove universal slash commands or installed-client compatibility.
 
 If APP is down, say **Launch 360 Hextile, then retry**. For missing MCP, point to the package README's host install/reconnect instructions; do not install, restart APP or change host permissions on the user's behalf. Grants constrain APP disclosure, ingestion and Apply; they are not a filesystem sandbox for the coding host.

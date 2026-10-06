@@ -40,7 +40,7 @@ from hextile_client import (  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
-SERVER_VERSION = "0.5.1"
+SERVER_VERSION = "0.5.2"
 ACTIVITY_SCHEMA = "hextile.agent.activity.v1"
 CHILD_TOKEN_ENV = "HEXTILE_MCP_CHILD_TOKEN"
 
@@ -413,7 +413,7 @@ _WORKSPACE_GUIDANCE = (
     "Omitted/false keeps the source-free legacy receipt. Missing support requires upgrade/reconnect, never downgrade. "
     "Workspace schema 2 is format support; source-modules/1 execution requires APP available and executable_capabilities. "
     "Recognized capabilities, guide text and version numbers do not prove execution or installed host filesystem access. "
-    "Open requires a clean Project Shader, Follow and whole-source read/propose authority. "
+    "Open requires a clean Project or My Library Shader, Follow and whole-source read/propose authority. "
     "Only acknowledged open returns files after APP acquires the mounted readonly/autosave hold. "
     "V1 edits source.glsl (64 KiB) and authoring.json (2 MiB), with a complete derived document <= 2 MiB. "
     "Keep v1 sidecar base immutable. V1 digest raw bytes without newline/JSON normalization: sha256: + SHA256("
@@ -1747,13 +1747,13 @@ TOOLS: list[dict[str, Any]] = [
                     "APP alone checks grants and materializes IDs. Legacy proposals and every Board row must preserve Playable "
                     "conventions, envelope definitions/input refs/settings, envelope-sourced mappings and their capability declarations. "
                     "To first create or revise Playable controls, use the attested source.glsl/authoring.json workspace "
-                    "and installed 360-hextile skill. Does not Import, Accept, Apply, Run, arm Interact, press keys, "
+                    "and installed shader skill. Does not Import, Accept, Apply, Run, arm Interact, press keys, "
                     "set live pose or write Project presets.",
      "inputSchema": _SHADER_PROPOSAL_SCHEMA, "annotations": _annotations("propose_shader")},
     {"name": "open_shader_workspace",
-     "description": "Attach native files for a Project Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,
+     "description": "Attach native files for a Project or My Library Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,
      "inputSchema": _shader_closed({
-         "shader": _shader_closed({"origin": {"const": "project"}, "shaderId": {
+         "shader": _shader_closed({"origin": {"enum": ["project", "user"]}, "shaderId": {
              "type": "string", "minLength": 1, "maxLength": 128, "pattern": r"^[A-Za-z0-9_-]+$"}}),
          "project_context_witness": _WORKSPACE_WITNESS,
          "expected_working_revision": {"type": "integer", "minimum": 1},

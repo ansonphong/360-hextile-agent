@@ -79,7 +79,7 @@ def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
             refuse()
         shader = args["shader"]
         if (type(shader) is not dict or set(shader) != {"origin", "shaderId"}
-                or shader["origin"] != "project" or not text(shader["shaderId"], 128)
+                or shader["origin"] not in ("project", "user") or not text(shader["shaderId"], 128)
                 or re.fullmatch(r"[A-Za-z0-9_-]+", shader["shaderId"]) is None
                 or not text(args["project_context_witness"]) or not text(args["studio_surface_id"])
                 or (supplied and (type(args["expected_working_revision"]) is not int or args["expected_working_revision"] < 1

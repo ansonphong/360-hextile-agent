@@ -291,7 +291,7 @@ def test_workspace_closed_schemas_and_transport_admission() -> None:
             jsonschema.validate(adopted, schema)
             malformed += [{**args, "shader": {**args["shader"], "path": "D:/other"}},
                           {**adopted, "existing_workspace": {**adopted["existing_workspace"], "force": True}},
-                          {**args, "shader": {"origin": "user", "shaderId": "aurora"}},
+                          {**args, "shader": {"origin": "builtin", "shaderId": "aurora"}},
                           {**args, "existing_workspace": None}, {**args, "expected_working_revision": True}]
         for body in malformed:
             with pytest.raises(jsonschema.ValidationError):
@@ -700,7 +700,7 @@ def test_workspace_v2_uncertain_mutations_do_not_replay_or_release_paths(operati
 
 
 def _playable_recipe() -> tuple[list[str], dict[str, Any]]:
-    guide = (ROOT / "skills/hextile/references/recipes.md").read_text(encoding="utf-8")
+    guide = (ROOT / "skills/360-hextile/references/recipes.md").read_text(encoding="utf-8")
     shader_section = guide.split("## Recipe I — Playable Shaders:", 1)[1]
     sources = re.findall(r"```glsl\n(.*?)```", shader_section, re.S)
     extensions = json.loads(re.search(r"```json\n(.*?)```", shader_section, re.S).group(1))
@@ -775,6 +775,6 @@ def test_playable_tool_guidance_preserves_legacy_authority_and_no_new_controls()
     operations = _schema("propose_shader")["inputSchema"]["properties"]["modulation_edits"]
     assert operations["properties"]["schema"] == {"const": 1}
     assert not {"press_key", "set_pose", "arm_interact", "save_project_convention"} & {tool["name"] for tool in TOOLS}
-    source = (ROOT / "skills/hextile/SKILL.md").read_text(encoding="utf-8")
+    source = (ROOT / "skills/360-hextile/SKILL.md").read_text(encoding="utf-8")
     fragment = (ROOT / "codex/AGENTS-fragment.md").read_text(encoding="utf-8")
     assert fragment.split("-->\n\n", 1)[1] == source.split("\n---\n", 1)[1].lstrip("\n")
