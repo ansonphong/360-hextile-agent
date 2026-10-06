@@ -40,7 +40,7 @@ from hextile_client import (  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "hextile"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.5.0"
 ACTIVITY_SCHEMA = "hextile.agent.activity.v1"
 CHILD_TOKEN_ENV = "HEXTILE_MCP_CHILD_TOKEN"
 
@@ -295,7 +295,7 @@ GUIDE_NAMES = (
     "website-index",
     "recipes",
 )
-_GUIDE_ROOT = Path(__file__).resolve().parent.parent / "skills" / "hextile" / "references"
+_GUIDE_ROOT = Path(__file__).resolve().parent.parent / "skills" / "360-hextile" / "references"
 
 
 def _annotations(name: str) -> dict[str, bool]:

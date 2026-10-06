@@ -7,7 +7,7 @@
   },
   "plugins": [
     {
-      "name": "hextile-agent",
+      "name": "360-hextile",
       "description": "List, save, run, and monitor 360 Hextile Workflows over localhost HTTP",
       "category": "productivity",
       "source": {

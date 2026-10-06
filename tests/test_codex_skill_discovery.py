@@ -35,9 +35,9 @@ INSTALL_SPEC.loader.exec_module(INSTALL)
 def isolated_generated_fragment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Exercise the real generator without rewriting the checked-in fragment."""
     isolated_root = tmp_path / "fragment-package"
-    skill = isolated_root / "skills" / "hextile" / "SKILL.md"
+    skill = isolated_root / "skills" / "360-hextile" / "SKILL.md"
     skill.parent.mkdir(parents=True)
-    shutil.copyfile(ROOT / "skills" / "hextile" / "SKILL.md", skill)
+    shutil.copyfile(ROOT / "skills" / "360-hextile" / "SKILL.md", skill)
     (isolated_root / "codex").mkdir()
     actual_generator = INSTALL.write_agents_fragment
 
@@ -54,7 +54,7 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
     rc = INSTALL.main(["--home", str(tmp_path)])
     assert rc == 0
 
-    for name in ("hextile", "360-hextile", "hextile-upres"):
+    for name in ("360-hextile", "shader", "upres"):
         source = ROOT / "skills" / name
         installed = tmp_path / ".agents" / "skills" / name
         assert (installed / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
@@ -66,11 +66,11 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
                 assert (installed / reference.relative_to(source)).read_bytes() == reference.read_bytes()
     assert not (tmp_path / ".codex" / "skills" / "hextile").exists()
 
-    specialized = (tmp_path / ".agents" / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
-    umbrella = (tmp_path / ".agents" / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
-    assert specialized.startswith("---\nname: 360-hextile\n")
-    assert umbrella.startswith("---\nname: hextile\n")
-    assert "installed `360-hextile`" in umbrella
+    specialized = (tmp_path / ".agents" / "skills" / "shader" / "SKILL.md").read_text(encoding="utf-8")
+    umbrella = (tmp_path / ".agents" / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
+    assert specialized.startswith("---\nname: shader\n")
+    assert umbrella.startswith("---\nname: 360-hextile\n")
+    assert "installed **`shader`**" in umbrella
     assert "workspace_schema:2" in specialized
     assert "negotiate v2" in umbrella
     for body in (specialized, umbrella):
@@ -90,7 +90,7 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
     assert "v2 `authoring.json` has no saved-base field" in specialized
     assert "v1 pair or complete v2 declared set" in umbrella
 
-    references = tmp_path / ".agents" / "skills" / "hextile" / "references"
+    references = tmp_path / ".agents" / "skills" / "360-hextile" / "references"
     recipes = (references / "recipes.md").read_text(encoding="utf-8")
     practices = (references / "best-practices.md").read_text(encoding="utf-8")
     assert "unaccepted clone with no saved revision" in recipes
@@ -107,10 +107,10 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
     )
 
     # Marker-owned refresh restores the package skill, keeping one MCP table.
-    shader = tmp_path / ".agents" / "skills" / "360-hextile" / "SKILL.md"
+    shader = tmp_path / ".agents" / "skills" / "shader" / "SKILL.md"
     shader.write_text("stale installed skill", encoding="utf-8")
     assert INSTALL.main(["--home", str(tmp_path)]) == 0
-    assert shader.read_bytes() == (ROOT / "skills" / "360-hextile" / "SKILL.md").read_bytes()
+    assert shader.read_bytes() == (ROOT / "skills" / "shader" / "SKILL.md").read_bytes()
     assert (tmp_path / ".codex" / "config.toml").read_text().count("[mcp_servers.hextile]") == 1
 
 
@@ -134,9 +134,9 @@ def test_uninstall_removes_agents_root_and_marker_legacy_keeps_survivor(
 
     assert INSTALL.main(["--uninstall", "--home", str(tmp_path)]) == 0
 
-    assert not (tmp_path / ".agents" / "skills" / "hextile").exists()
     assert not (tmp_path / ".agents" / "skills" / "360-hextile").exists()
-    assert not (tmp_path / ".agents" / "skills" / "hextile-upres").exists()
+    assert not (tmp_path / ".agents" / "skills" / "shader").exists()
+    assert not (tmp_path / ".agents" / "skills" / "upres").exists()
     assert not legacy.exists()
     assert survivor.is_file()
     assert survivor.read_text(encoding="utf-8") == "stay"
@@ -156,7 +156,7 @@ def test_uninstall_leaves_unmarked_legacy_codex_skills(tmp_path: Path) -> None:
     assert keep.read_text(encoding="utf-8") == "mine"
 
 
-@pytest.mark.parametrize("name", ["hextile", "360-hextile", "hextile-upres"])
+@pytest.mark.parametrize("name", ["360-hextile", "shader", "upres"])
 def test_uninstall_leaves_unmarked_agents_skill(tmp_path: Path, name: str) -> None:
     unmarked = tmp_path / ".agents" / "skills" / name
     unmarked.mkdir(parents=True, exist_ok=True)
@@ -168,7 +168,7 @@ def test_uninstall_leaves_unmarked_agents_skill(tmp_path: Path, name: str) -> No
     assert keep.read_text(encoding="utf-8") == "mine"
 
 
-@pytest.mark.parametrize("name", ["hextile", "360-hextile"])
+@pytest.mark.parametrize("name", ["360-hextile", "shader"])
 @pytest.mark.parametrize("refresh", [False, True])
 def test_install_refuses_unmarked_skill_without_changing_home(
     tmp_path: Path, name: str, refresh: bool,
@@ -190,7 +190,7 @@ def test_install_refuses_unmarked_skill_without_changing_home(
     assert after == before
 
 
-@pytest.mark.parametrize("name", ["hextile", "360-hextile"])
+@pytest.mark.parametrize("name", ["360-hextile", "shader"])
 def test_install_and_uninstall_leave_symlinked_skill(tmp_path: Path, name: str) -> None:
     foreign = tmp_path / "foreign"
     foreign.mkdir()
@@ -209,12 +209,12 @@ def test_install_and_uninstall_leave_symlinked_skill(tmp_path: Path, name: str) 
 
 
 @pytest.mark.parametrize("name,relative,conflict", [
-    ("360-hextile", "SKILL.md", "symlink"),
-    ("360-hextile", "SKILL.md", "directory"),
-    ("hextile", "references", "file"),
-    ("hextile", "references", "symlink"),
-    ("hextile", "references/best-practices.md", "directory"),
-    ("hextile", "references/best-practices.md", "symlink"),
+    ("shader", "SKILL.md", "symlink"),
+    ("shader", "SKILL.md", "directory"),
+    ("360-hextile", "references", "file"),
+    ("360-hextile", "references", "symlink"),
+    ("360-hextile", "references/best-practices.md", "directory"),
+    ("360-hextile", "references/best-practices.md", "symlink"),
 ])
 def test_refresh_refuses_copied_node_conflicts_before_any_change(
     tmp_path: Path, name: str, relative: str, conflict: str,
@@ -222,7 +222,7 @@ def test_refresh_refuses_copied_node_conflicts_before_any_change(
     assert INSTALL.main(["--home", str(tmp_path)]) == 0
     skills = tmp_path / ".agents" / "skills"
     # This sibling would be refreshed first without a complete preflight.
-    (skills / "hextile" / "SKILL.md").write_text("stale sibling", encoding="utf-8")
+    (skills / "360-hextile" / "SKILL.md").write_text("stale sibling", encoding="utf-8")
     target = skills / name / relative
     was_directory = target.is_dir()
     if was_directory:
@@ -277,7 +277,7 @@ def test_uninstall_preserves_symlinked_legacy_ownership(tmp_path: Path, link: st
 def test_fragment_tracks_legacy_hub_and_source_versions_agree(isolated_generated_fragment: Path) -> None:
     committed = (ROOT / "codex" / "AGENTS-fragment.md").read_text(encoding="utf-8")
     assert committed.split("\n\n", 1)[1] == INSTALL.strip_frontmatter(
-        (ROOT / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
+        (ROOT / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
     )
     assert INSTALL.main(["--write-fragment"]) == 0
     assert isolated_generated_fragment.read_text(encoding="utf-8") == committed
@@ -288,5 +288,5 @@ def test_fragment_tracks_legacy_hub_and_source_versions_agree(isolated_generated
         if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "SERVER_VERSION" for target in node.targets)
     )
-    assert INSTALL.PACKAGE_VERSION == manifest["version"] == server_version == "0.4.0"
+    assert INSTALL.PACKAGE_VERSION == manifest["version"] == server_version == "0.5.0"
     assert f"**v{INSTALL.PACKAGE_VERSION}**" in (ROOT / "README.md").read_text(encoding="utf-8")

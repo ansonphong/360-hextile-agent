@@ -1,10 +1,10 @@
 ---
-name: hextile-upres
-description: "GPU upres a still, a folder of stills, or a video through 360 Hextile Real-ESRGAN. Use when the user says /hextile-upres, /upres, upres this image, upscale this folder, upres this video, or Real-ESRGAN sequence. Not hextile-pipe. Do not invent upscale_image."
+name: upres
+description: "GPU upres a still, a folder of stills, or a video through 360 Hextile Real-ESRGAN. Use when the user says /360-hextile:upres, /upres, upres this image, upscale this folder, upres this video, or Real-ESRGAN sequence. Not hextile-pipe. Do not invent upscale_image."
 user-invocable: true
 ---
 
-# /hextile-upres
+# /360-hextile:upres
 
 GPU Real-ESRGAN upres through the running **360 Hextile** app (`hextile` MCP). Do **not** invent `upscale_image`. Do **not** send GPU upres through `hextile-pipe`.
 

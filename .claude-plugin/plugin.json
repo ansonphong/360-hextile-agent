@@ -1,7 +1,7 @@
 {
-  "name": "hextile-agent",
-  "version": "0.4.0",
-  "description": "Drive 360 Hextile workflows from Claude Code — list/save templates, run and monitor renders, 360-LoRA seeds, GPU upres via /hextile-upres, bundled guides.",
+  "name": "360-hextile",
+  "version": "0.5.0",
+  "description": "Drive 360 Hextile workflows from Claude Code — list/save templates, run and monitor renders, 360-LoRA seeds, GPU upres via /360-hextile:upres, bundled guides.",
   "author": {
     "name": "Phong",
     "url": "https://github.com/ansonphong"

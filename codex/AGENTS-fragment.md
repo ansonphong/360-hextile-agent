@@ -1,14 +1,14 @@
-<!-- Generated from skills/hextile/SKILL.md — edit SKILL.md only, then re-run: python3 codex/install.py --write-fragment -->
+<!-- Generated from skills/360-hextile/SKILL.md — edit SKILL.md only, then re-run: python3 codex/install.py --write-fragment -->
 
 # 360 Hextile — Agent Skill
 
 Drive **360 Hextile** (desktop app) while it is running on this machine. Tools talk to `http://127.0.0.1:8000` through the `hextile` MCP server. **The server owns config authority** — merge, `HextileConfig` validation, and queueing happen in the app, not in this plugin.
 
-Install id: **`hextile-agent@360-hextile`**. Marketplace `360-hextile`. Skill/MCP token `hextile`. Do not install `hextile@360-hextile`.
+Install id: **`360-hextile@360-hextile`**. Marketplace `360-hextile`. Skill `360-hextile`. MCP token `hextile`. Do not install `hextile@360-hextile` or `hextile-agent@360-hextile` (old name).
 
 See `references/agent-lexicon.md` for locked words, the complementarity card, and `REFUSE_*` strings.
 
-For Project Shader coding, invoke the installed **`360-hextile`** skill using this host's observed syntax. It owns the acknowledged native-file procedure: negotiate v2 for the complete `workspace/` manifest or retain v1 for its two-file pair; edit only granted files, register the full raw digest, read APP diagnostics, repair/re-register, and leave review/**Apply** to the human. Read `get_guide` `best-practices`, `recipes`, `workflow-schema` and `website-index`, and the human page https://360hextile.com/docs/create/shader. A docs page, known schema, recognized `source-modules/1`, or source fixture does not prove installed shared-file access or executable support; observe APP `available`, executable capabilities and candidate `execution_ready`. Git CLI actions need a separate user instruction; MCP supplies no Git or auto-Apply tool. For **Playable Shaders** (`conventions/1`, `modulation/2`), one Enter-blast request authors the parameter, GLSL, logical gate, keyboard binding, BLAST envelope and Range mapping together. Control authoring never arms Interact, presses keys, changes live pose or writes Project presets. This hub remains the general Workflow automation entry.
+For Project Shader coding, invoke the installed **`shader`** skill (`/360-hextile:shader` on Claude) using this host's observed syntax. It owns the acknowledged native-file procedure: negotiate v2 for the complete `workspace/` manifest or retain v1 for its two-file pair; edit only granted files, register the full raw digest, read APP diagnostics, repair/re-register, and leave review/**Apply** to the human. Read `get_guide` `best-practices`, `recipes`, `workflow-schema` and `website-index`, and the human page https://360hextile.com/docs/create/shader. A docs page, known schema, recognized `source-modules/1`, or source fixture does not prove installed shared-file access or executable support; observe APP `available`, executable capabilities and candidate `execution_ready`. Git CLI actions need a separate user instruction; MCP supplies no Git or auto-Apply tool. For **Playable Shaders** (`conventions/1`, `modulation/2`), one Enter-blast request authors the parameter, GLSL, logical gate, keyboard binding, BLAST envelope and Range mapping together. Control authoring never arms Interact, presses keys, changes live pose or writes Project presets. This hub remains the general Workflow automation entry.
 
 - Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
 - MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
@@ -183,7 +183,7 @@ new approval only if another mutation is still needed.
 
 ## Upres
 
-GPU upres of a still, a folder, or a video → skill `/hextile-upres`. Do not invent `upscale_image`. Do not send GPU upres through `hextile-pipe`.
+GPU upres of a still, a folder, or a video → skill `upres` (`/360-hextile:upres` on Claude). Do not invent `upscale_image`. Do not send GPU upres through `hextile-pipe`.
 
 Stills use `run_workflow` with builtin `upres-still`. Folders and video use that skill's sequence door (`run_workflow` cannot create a `seq_*`). Recipes E (still) and F (folder/video) live in `get_guide` `recipes`.
 

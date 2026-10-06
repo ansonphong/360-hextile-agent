@@ -1,11 +1,11 @@
 # 360-hextile-agent
 
-**v0.4.0**
+**v0.5.0**
 
 Claude Code plugin + Codex twin that drive **360 Hextile** over localhost HTTP.
 
-Primary marketplace: **`ansonphong/360-hextile-plugins`** — the shared 360 Hextile catalog. Install id **`hextile-agent@360-hextile`**. The studio-matte plugin `hextile-pipe` ships from the same catalog.
-Standalone marketplace (footnote): **`ansonphong/360-hextile-agent`** — this repo on its own, install id **`hextile-agent@hextile-agent`**.
+Primary marketplace: **`ansonphong/360-hextile-plugins`** — the shared 360 Hextile catalog. Install id **`360-hextile@360-hextile`**. The studio-matte plugin `hextile-pipe` ships from the same catalog.
+Standalone marketplace (footnote): **`ansonphong/360-hextile-agent`** — this repo on its own, install id **`360-hextile@hextile-agent`**.
 
 The MCP process is a thin **stdio** JSON-RPC ↔ HTTP proxy (`python3`, stdlib only).  
 All merge, validation, and render logic stay in the running app at `http://127.0.0.1:8000`.
@@ -25,24 +25,24 @@ Primary — the 360 Hextile catalog (ships this plugin **and** `hextile-pipe`):
 
 ```bash
 /plugin marketplace add ansonphong/360-hextile-plugins
-/plugin install hextile-agent@360-hextile
+/plugin install 360-hextile@360-hextile
 ```
 
 Standalone — this repo as its own marketplace:
 
 ```bash
 /plugin marketplace add ansonphong/360-hextile-agent
-/plugin install hextile-agent@hextile-agent
+/plugin install 360-hextile@hextile-agent
 ```
 
-Local checkout of this tree still works: add the directory as a marketplace root, then `/plugin install hextile-agent@hextile-agent`.
+Local checkout of this tree still works: add the directory as a marketplace root, then `/plugin install 360-hextile@hextile-agent`.
 
 ```bash
 # package root is the plugin root:
 #   .claude-plugin/plugin.json
 #   .claude-plugin/marketplace.json
 #   .mcp.json          → python3 ${CLAUDE_PLUGIN_ROOT}/mcp/hextile_mcp.py
-#   skills/hextile/SKILL.md
+#   skills/360-hextile/SKILL.md
 ```
 
 On Windows, change Claude `.mcp.json` `command` to `python` or `py -3` (not `python3`). Do not rewrite the committed POSIX `.mcp.json`. Codex installer already writes `sys.executable`.
@@ -55,23 +55,23 @@ Primary — the 360 Hextile catalog:
 
 ```bash
 grok plugin marketplace add ansonphong/360-hextile-plugins
-grok plugin install hextile-agent --trust
+grok plugin install 360-hextile --trust
 ```
 
 Standalone — this repo as its own marketplace:
 
 ```bash
 grok plugin marketplace add ansonphong/360-hextile-agent
-grok plugin install hextile-agent --trust
+grok plugin install 360-hextile --trust
 ```
 
-Enable `hextile-agent` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
+Enable `360-hextile` in `~/.grok/config.toml` `[plugins].enabled` (or Space in `/plugins`). Reload plugins (`r`) or start a new session.
 
-A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install hextile-agent --trust`.
+A local checkout still works: `grok plugin marketplace add /path/to/hextile-agent` then `grok plugin install 360-hextile --trust`.
 
 ## Install — Codex
 
-From the 360 Hextile catalog (`ansonphong/360-hextile-plugins`): `codex plugin marketplace add <path-or-github>` then `codex plugin add hextile-agent@360-hextile`.
+From the 360 Hextile catalog (`ansonphong/360-hextile-plugins`): `codex plugin marketplace add <path-or-github>` then `codex plugin add 360-hextile@360-hextile`.
 
 Standalone — clone this repo and run the installer:
 
@@ -83,9 +83,9 @@ python3 codex/install.py
 
 This writes:
 
-- `~/.agents/skills/360-hextile/SKILL.md`
-- `~/.agents/skills/hextile/SKILL.md` + `references/`
-- `~/.agents/skills/hextile-upres/SKILL.md`
+- `~/.agents/skills/360-hextile/SKILL.md` + `references/`
+- `~/.agents/skills/shader/SKILL.md`
+- `~/.agents/skills/upres/SKILL.md`
 - `[mcp_servers.hextile]` **stdio** entry in `~/.codex/config.toml`  
   (`command` is the absolute `sys.executable`, `args = ["…/mcp/hextile_mcp.py"]`)
 
@@ -99,9 +99,9 @@ Restart Codex and run `/mcp` — you should see `hextile`.
 
 Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
 
-## /hextile-upres
+## /360-hextile:upres
 
-GPU Real-ESRGAN upres through the running 360 Hextile app. Skill name is **`/hextile-upres`** (not bare `/upres`; the description also triggers on `/upres`). Not `hextile-pipe`. Do not invent `upscale_image`.
+GPU Real-ESRGAN upres through the running 360 Hextile app. Skill name is **`/360-hextile:upres`** (not bare `/upres`; the description also triggers on `/upres`). Not `hextile-pipe`. Do not invent `upscale_image`.
 
 | Input | Door |
 |-------|------|
@@ -112,13 +112,13 @@ GPU Real-ESRGAN upres through the running 360 Hextile app. Skill name is **`/hex
 
 ### Hosts
 
-Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
+Install id stays **`360-hextile@360-hextile`**. Hosts do **not** auto-update.
 
-| Host | How `/hextile-upres` lands |
+| Host | How `/360-hextile:upres` lands |
 |------|---------------------------|
-| **Claude Code** | Plugin skills auto-discover from `plugin.json` `"skills": "./skills/"` after `/plugin install hextile-agent@360-hextile` (or marketplace update + `/plugin update hextile-agent`). |
-| **Grok** | Catalog SHA pin in `ansonphong/360-hextile-plugins`. After that pin is on GitHub: `grok plugin marketplace update` then `grok plugin update hextile-agent`. |
-| **Codex** | `python3 codex/install.py` writes `~/.agents/skills/hextile-upres/SKILL.md`. |
+| **Claude Code** | Plugin skills auto-discover from `plugin.json` `"skills": "./skills/"` after `/plugin install 360-hextile@360-hextile` (or marketplace update + `/plugin update 360-hextile`). |
+| **Grok** | Catalog SHA pin in `ansonphong/360-hextile-plugins`. After that pin is on GitHub: `grok plugin marketplace update` then `grok plugin update 360-hextile`. |
+| **Codex** | `python3 codex/install.py` writes `~/.agents/skills/upres/SKILL.md`. |
 
 ## Selected tools
 
@@ -146,7 +146,7 @@ Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
 | `cancel_seed` | `POST /api/360-lora/cancel` |
 | `list_360_loras` | `GET /api/360-lora/loras` |
 | `list_installed_models` | `GET /api/models/{pipeline_id}?installed_only=true` |
-| `get_guide` | bundled `skills/hextile/references/*.md` |
+| `get_guide` | bundled `skills/360-hextile/references/*.md` |
 | `extract_sequence_video` | `POST /api/sequences/extract-video` |
 | `create_sequence` | `POST /api/sequences/create` |
 | `start_sequence` | `POST /api/sequences/{id}/start` |
@@ -154,14 +154,14 @@ Install id stays **`hextile-agent@360-hextile`**. Hosts do **not** auto-update.
 | `list_sequences` | `GET /api/sequences/` |
 | `stop_sequence` | `POST /api/sequences/{id}/stop` |
 
-Instruction surface: **`skills/360-hextile/SKILL.md`** (authoritative Shader file procedure), **`skills/hextile/SKILL.md`** (general automation hub) and **`skills/hextile-upres/SKILL.md`**.
+Instruction surface: **`skills/360-hextile/SKILL.md`** (general automation hub), **`skills/shader/SKILL.md`** (authoritative Shader file procedure) and **`skills/upres/SKILL.md`**.
 Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SKILL only.
 
 ### Shader authoring in your coding host
 
-The `360-hextile` skill edits the open Project Shader through the acknowledged `source.glsl` / `authoring.json` pair, registers a raw-byte framed digest and polls real APP Prepare/compiler receipts, with at most three repairs. Workshop Apply stays human. Installed MCP connectivity and native access to the same physical Project/worktree files are both required; a remote connector alone is insufficient. APP grants control disclosure/ingestion/Apply, not the host's filesystem permissions. Reasoning belongs to your host account/provider and may incur charges or quota limits.
+The `shader` skill edits the open Project Shader through the acknowledged `source.glsl` / `authoring.json` pair, registers a raw-byte framed digest and polls real APP Prepare/compiler receipts, with at most three repairs. Workshop Apply stays human. Installed MCP connectivity and native access to the same physical Project/worktree files are both required; a remote connector alone is insufficient. APP grants control disclosure/ingestion/Apply, not the host's filesystem permissions. Reasoning belongs to your host account/provider and may incur charges or quota limits.
 
-Claude discovers sibling skills through the plugin's `./skills/` directory; its plugin namespace may differ from bare `/360-hextile`. Codex uses separately installed sibling skill directories: confirm both `360-hextile` and the retained `hextile` in the installed picker. Check actual Codex/Grok invocation syntax on the installed client; source layout is not installed-host proof, and Grok's Shader invocation remains pending that proof. Reconnect the `hextile` MCP server if tools are absent, and launch APP if it is unavailable. Do not infer Shader support from ordinary Workflow tools.
+Claude prefixes plugin skills with the plugin name: `/360-hextile:360-hextile` (hub), `/360-hextile:shader`, `/360-hextile:upres`. Codex uses separately installed sibling skill directories (`360-hextile`, `shader`, `upres`): confirm all three in the installed picker. Check actual Codex/Grok invocation syntax on the installed client; source layout is not installed-host proof.
 
 Open a clean Project Shader in Workshop, enable MCP Follow and whole-asset source_read/propose grants, then invoke the installed skill with your requested change. If open acknowledgement is unknown, preserve files and reconnect; never edit presumed paths. Timeout or exhausted repairs includes the last exact receipt and instructions to re-enter this same host skill. APP Retry rechecks a candidate; it cannot wake an idle coding host. Playable and input-adapter guidance is conditional on observed executable support, not merely document declarations. Neither compiler pass nor a preview certifies physical input behavior or saving.
 
@@ -209,7 +209,7 @@ The proxy never hangs waiting for the app at startup.
 
 ## curl fallback
 
-If python3 / MCP is unavailable, agents can still drive the API — see the curl appendix in `skills/hextile/SKILL.md`.
+If python3 / MCP is unavailable, agents can still drive the API — see the curl appendix in `skills/360-hextile/SKILL.md`.
 
 ```bash
 curl -s http://127.0.0.1:8000/api/workflows
@@ -227,9 +227,9 @@ hextile-agent/
   .grok-plugin/marketplace.json
   .mcp.json
   skills/360-hextile/SKILL.md
-  skills/hextile/SKILL.md
-  skills/hextile/references/
-  skills/hextile-upres/SKILL.md
+  skills/shader/SKILL.md
+  skills/360-hextile/references/
+  skills/upres/SKILL.md
   mcp/hextile_mcp.py
   mcp/hextile_client.py
   codex/install.py

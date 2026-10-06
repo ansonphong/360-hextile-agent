@@ -1,126 +1,306 @@
 ---
 name: 360-hextile
-description: "Edit a granted Project Shader through its acknowledged native files, register exact complete bytes, inspect APP diagnostics and leave Apply to the human."
+description: "Drive 360 Hextile workflows from an AI coding agent. Use when generating 360° panoramas, listing or saving workflow templates, overriding prompts, dry-run validation, 360-LoRA seeds, polling or listing renders, Batch jobs over many local images, or reading bundled automation guides."
 ---
 
-# 360 Hextile — Shader file authoring and Playable Shaders
+# 360 Hextile — Agent Skill
 
-This is the authoritative Shader procedure. The installed `hextile` skill remains the general Workflow automation hub. Reasoning runs in the user's coding host; APP owns attachment, candidate checks and accepted documents. The host account/provider may bill or limit reasoning. Read `get_guide(name="best-practices")`, `recipes`, `workflow-schema` and `website-index` for detail; human instructions are at https://360hextile.com/docs/create/shader and https://360hextile.com/docs/user-guide/agent-mode.
+Drive **360 Hextile** (desktop app) while it is running on this machine. Tools talk to `http://127.0.0.1:8000` through the `hextile` MCP server. **The server owns config authority** — merge, `HextileConfig` validation, and queueing happen in the app, not in this plugin.
 
-## Arguments
+Install id: **`360-hextile@360-hextile`**. Marketplace `360-hextile`. Skill `360-hextile`. MCP token `hextile`. Do not install `hextile@360-hextile` or `hextile-agent@360-hextile` (old name).
 
-Accept the user's requested Shader change as natural language. Resolve identity from fresh APP discovery, never from a guessed name, cached render or user-supplied path. Ask about an ambiguous creative outcome before changing files. This skill does not authorize unrelated installs, host permission changes, Git operations, UI Save/Discard or Apply.
+See `references/agent-lexicon.md` for locked words, the complementarity card, and `REFUSE_*` strings.
+
+For Project Shader coding, invoke the installed **`shader`** skill (`/360-hextile:shader` on Claude) using this host's observed syntax. It owns the acknowledged native-file procedure: negotiate v2 for the complete `workspace/` manifest or retain v1 for its two-file pair; edit only granted files, register the full raw digest, read APP diagnostics, repair/re-register, and leave review/**Apply** to the human. Read `get_guide` `best-practices`, `recipes`, `workflow-schema` and `website-index`, and the human page https://360hextile.com/docs/create/shader. A docs page, known schema, recognized `source-modules/1`, or source fixture does not prove installed shared-file access or executable support; observe APP `available`, executable capabilities and candidate `execution_ready`. Git CLI actions need a separate user instruction; MCP supplies no Git or auto-Apply tool. For **Playable Shaders** (`conventions/1`, `modulation/2`), one Enter-blast request authors the parameter, GLSL, logical gate, keyboard binding, BLAST envelope and Range mapping together. Control authoring never arms Interact, presses keys, changes live pose or writes Project presets. This hub remains the general Workflow automation entry.
+
+- Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
+- MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
+- MCP cannot `goto` or arm/operate an open Layers session (`REFUSE_NAV_MCP`, `REFUSE_LAYERS_MCP`).
+  The seven Generate Layer tools below are the narrow saved-render exception; live target requires an approved in-app Copilot turn.
+- MCP cannot arm Spot Clone, choose its source/destination in the viewer, or force a commit. The three Spot Clone tools below can act on an explicit saved render; `target=live` requires an approved internal Copilot turn with an already prepared operation.
+
+Before composing fields or teaching the user, call `get_guide` (`workflow-schema`, `best-practices`, `recipes`, `website-index`). Fetch website URLs from `website-index` when you need product-domain depth.
 
 ## Prerequisites
 
-- The installed `hextile` MCP connector must work with the running localhost APP, and the host must have native read/write access to the same physical Project/worktree files. MCP connectivity alone does not prove shared-file access.
-- A Project Shader must be open in Shader Workshop, with an attachable draft (saved or an unaccepted v2 clone), MCP Follow ON and a current whole-asset grant: `scope="asset"`, `source_read=true`, `propose=true`, with no selection-only restriction. Source disclosure and ingestion require this authority; human Apply has its own authority check.
-- Invoke the installed skill named `360-hextile` using the host's observed skill picker/command. Claude plugin invocation may have a namespace rather than bare `/360-hextile`. Check installed Codex and Grok syntax; folder/frontmatter names do not prove universal slash commands or installed-client compatibility.
+1. **360 Hextile is running** (backend on `127.0.0.1:8000`).
+2. **python3 ≥ 3.9** on PATH (MCP proxy). On Windows, Claude `.mcp.json` `command` should be `python` or `py -3`, not `python3`. Codex installer already writes `sys.executable`.
+3. App build with **`POST /api/workflows/run`** (workflow automation P0+).
 
-If APP is down, say **Launch 360 Hextile, then retry**. For missing MCP, point to the package README's host install/reconnect instructions; do not install, restart APP or change host permissions on the user's behalf. Grants constrain APP disclosure, ingestion and Apply; they are not a filesystem sandbox for the coding host.
+If a tool returns that the app is not running, tell the user verbatim:
 
-## Discover
+> Launch 360 Hextile, then retry
 
-1. Inspect host MCP `tools/list` for `get_capabilities`, `get_live_context`, `get_shader_context`, `get_guide`, `open_shader_workspace`, `register_shader_update` and `get_shader_update`. Missing names mean an incompatible installed connector; report the missing names. Do not invent flags or capabilities in `get_capabilities`.
-2. Call `get_capabilities` for the existing APP Workflow handshake, then `get_live_context`. Read `current_surface` and the separate current Follow/grant metadata. Require `kind="shader_workshop"`, `shader={origin:"project",shaderId}`, `studio_surface_id`, `project_context_witness`, and the actual saved or unaccepted `base`. Absent, expired or unsupported surface stops discovery. An unchanged Git HEAD or checked-in Project ID cannot prove physical worktree identity.
-3. Require an attachable draft state under the returned APP instructions; never flush, discard or attach over a dirty/saving/unknown draft. An existing `external_attached` state requires exact acknowledged reopen under the original authority, not a new attachment assumption.
-4. For a **saved** base only, `get_shader_context(origin="project", shader_id=<discovered shaderId>, project_context_witness=<discovered witness>, working_revision=<saved base revision>, include_source=true)` may read the accepted source under the whole-source grant. An **unaccepted v2 clone has no saved revision or `shader.json`**: do not call that saved-context read or invent a revision. Continue from live discovery to acknowledged v2 open, then read and verify its granted native bytes. Read `get_guide(name="recipes")` and `get_guide(name="best-practices")` before authoring fields.
-5. Negotiate the intended format: call `open_shader_workspace` with `workspace_schema:2` for a complete portable v2 workspace; omit that key for the legacy v1 pair. Supply the discovered `shader`, `project_context_witness` and `studio_surface_id`, with the saved `expected_working_revision`, `expected_document_hash` and `expected_source_hash` only when a saved base exists. V2 unaccepted bases omit that saved triple. Supply no path. If existing files diverge, show the exact digest/base conflict and obtain explicit adoption of those existing bytes; only then add `existing_workspace={action:"adopt",expected_content_digest:<shown digest>}`. Never merge, reseed or overwrite existing files to attach.
-6. Wait for successful acknowledged open with a real `handle`, `generation`, `content_digest` and matching Shader/surface/witness. V1 returns `files={source_path,authoring_path}`; v2 must acknowledge `workspace_schema:2`, `workspace_root`, `authoring_path` and ordered `files=[{path,native_path}]`. Validate the chosen shape; a v1 reply to a v2 request is upgrade/reconnect, never silent downgrade. APP must acquire the mounted readonly/autosave hold before paths are released. A reservation, socket notice or transport timeout is not attachment. After lost open transport, attempt at most one reopen with the exact original tuple, including optional adoption digest. If acknowledgement remains unknown, stop; do not invent paths.
-7. Verify native access to the **same physical** Project/worktree (map Windows and WSL paths when needed), regular confined files and the acknowledged raw `content_digest` **before editing**. Include the v2 authoring file and every declared source/Look/provenance member in that probe. A mismatch/inaccessible path stops with rediscovery guidance; do not guess another root. Read all acknowledged workspace ABI/schema/capability instructions. Format support, recognized capabilities and guide text do not prove executable `source-modules/1`, installed shared-file access or a passing candidate.
+Do not invent endpoints, do not hang, do not shell-sleep-poll forever without `get_status` / `list_runs`.
 
-## Complete portable workspace (negotiated v2)
+## What a Workflow is
 
-Use this branch only after the actual installed connector and APP acknowledge `workspace_schema:2`, and check `available`, `executable_capabilities` (including `source-modules/1`) and later candidate `execution_ready` before promising compilation. Otherwise use the unchanged v1 pair when appropriate or report upgrade/reconnect/unsupported. A docs page or a source fixture is not release evidence.
+A **Workflow is a full `.hextile.json` config document** (pipeline / hextile / input / diffusion / prompt / post / …), stored on shelves:
 
-`workspace/authoring.json` is schema 2 **metadata only**: `kind="360hextile.shader-workspace"`, `shader_id`, title/tags, `entry="source.glsl"`, ordered `source_files`, `look_files`, `provenance_file` and `original_files` descriptors plus the supported config. It holds no GLSL body, native path or saved base. `workspace/source.glsl` is the entry; helpers may live at declared relative logical paths such as `lib/noise.glsl` or `atmosphere/clouds.glsl`. Preserve unrelated metadata, stable IDs, Looks, provenance and referenced `workspace/resources/` PNGs, every sequence frame and optional `workspace/originals/` source. The acknowledged v2 `files` list is source-file transport, not a recursive authority over unlisted files. Resources and originals have separate APP verification; never treat an unlisted file or transient API `source_modules` field as durable JSON source storage.
+| origin   | Meaning                          |
+|----------|----------------------------------|
+| `builtin`| Shipped templates (e.g. `quick-scout`) — **immutable** |
+| `user`   | User library                     |
+| `project`| Project-scoped (needs an active project) |
 
-Use only strict UTF-8 `.glsl` logical paths, at most 32 source files including root and 256 UTF-8 bytes per path. The root owns the sole supported `hxMain` entry. A file-scope `#include "relative/path.glsl"` resolves from the including file's folder against declared files only; `.`/`..` operands may normalize inside the logical root, never escape it. Includes expand depth-first once in a shared GLSL namespace, so declaration/prototype order matters. Missing targets, case mismatch, cycles, unsupported include forms and invalid paths get diagnostics. The raw and expanded source caps are 64 KiB each; depth is at most 16. Do not split a program to bypass these caps.
+There is **no** separate workflow-envelope format — only `.hextile.json`. Prefer shelf `workflow_id` + overrides over inventing a full raw document.
 
-Edit the complete declared set through the acknowledged native paths, including `authoring.json` when its inventory changes. Re-read all declared source, Look and provenance bytes and follow the **returned v2 digest instructions**: `sha256:` of the `360hextile.shader-workspace.v2\0` framing, raw authoring bytes, count, and each declared path/raw member in UTF-8 order. Include unused helpers and preserve BOM/CRLF bytes; never normalize JSON or text. Originals/resources are verified separately. Match the acknowledged pre-edit digest first, then register the new complete digest with the canonical next `change_id`. Registration freezes the candidate and starts APP Prepare/compile; it does not save. Poll `get_shader_update` for exact candidate and `check_attempt`. When current grants, witness and candidate permit it, request `include_source_diagnostics:true` for bounded logical file/line diagnostics; absent/false remains source-free. A bad helper can be repaired after Prepare failure, then the full set is registered again with a fresh ID. Do not read a stale located result after re-registration. Review source, metadata, Looks and check states with the human; **only the human Applies**.
+## Tools
 
-Copilot's source-granted logical file proposals use the same current complete candidate, Prepare/review and human Apply boundary. They do not grant this external coding host native-file access, Git authority or auto-Apply.
+| Tool | When to use | Mutates? |
+|------|-------------|----------|
+| `get_capabilities` | Handshake before a session | no |
+| `get_live_context` | Studio snapshot (follow + doc_generation + live export) | no |
+| `apply_config_delta` | Live delta on the open file (follow ON). Never queues | **yes** |
+| `get_guide` | Schema, practices, recipes, website index | no |
+| `list_workflows` | Discover templates | no |
+| `get_workflow` | Read one template before override or clone | no |
+| `describe_image` | Describe an exact local file or render graph node, optionally at a 2:1 panorama crop pose; local vision/GPU requires approval and returns text only | **yes** |
+| `save_workflow` | Persist a **new** id on user/project | **yes** |
+| `delete_workflow` | Remove a user/project workflow | **yes** |
+| `validate_config` | Dry-run merge+validate (terraform plan) | no |
+| `list_installed_models` | Installed weights — dry-run is Pydantic only | no |
+| `get_model_readiness` | Read current model fit, missing components, and install bundles | no |
+| `get_model_download_queue` | Read active/queued downloads and exact queue-entry tokens | no |
+| `install_model` | Queue one registry model or a fingerprint-bound selected bundle | **yes** |
+| `repair_model` | Request server-diagnosed repair of one registry model | **yes** |
+| `cancel_model_download` | Request stop of one observed queue admission | **yes** |
+| `run_workflow` | Queue a render after overrides | **yes** |
+| `get_status` | Poll `run_id` progress / output paths | no |
+| `get_gpu_diagnostics` | Read app-owned GPU/VRAM snapshot, its sample age, and known/unknown holders | no |
+| `get_seed_memory_advice` | Read separate GPU status and selected 360-LoRA resolution pressure advice | no |
+| `get_render_config` | Read producing .hextile.json for a render | no |
+| `get_logs` | Fetch failed-run logs | no |
+| `list_runs` | Find jobs if you lost `run_id` | no |
+| `search_library_prompts` | Search saved render/sequence prompt text; page exact IDs and snippets with `cursor` | no |
+| `cancel_run` | Kill a long GPU run | **yes** |
+| `retry_run` | Retry a crashed/failed run; `vram_recovery=true` explicitly permits guarded idle-holder eviction for that exact render | **yes** |
+| `list_360_loras` | Discover `path` + `base_model` for seeds | no |
+| `generate_seed` | Submit a 360-LoRA job with a caller-supplied UUID | **yes** |
+| `get_seed_job` | Read exact seed job progress, original-index results, and errors | no |
+| `list_seed_history` | List stored seed batches | no |
+| `get_seed_batch` | Read one stored seed batch | no |
+| `cancel_seed` | Cancel the named 360-LoRA job, not a render | **yes** |
+| `extract_sequence_video` | Extract video frames to a folder (video sequence door) | **yes** |
+| `create_sequence` | Create a `seq_*` from a folder + full config (not `run_workflow`) | **yes** |
+| `start_sequence` | Queue GPU for an existing sequence | **yes** |
+| `get_sequence` | Poll `sequence_id` progress / output (not `get_status`) | no |
+| `list_sequences` | Find sequences if you lost `sequence_id` | no |
+| `stop_sequence` | Kill a running sequence | **yes** |
+| `preflight_batch` | Strict Batch preflight over a frozen workflow + folder/files | **yes** |
+| `get_batch_preflight` | Poll preflight until ready/failed/expired; get spec_hash | no |
+| `start_batch` | Queue a Batch job from a ready preflight (not run_workflow) | **yes** |
+| `list_batches` | List Batch jobs (not list_runs) | no |
+| `get_batch` | Poll one Batch job (never pass job_id to get_status) | no |
+| `get_batch_items` | Page Batch item attempts | no |
+| `pause_batch` | Pause after the current item publishes | **yes** |
+| `resume_batch` | Resume a paused Batch job (same frozen recipe) | **yes** |
+| `cancel_batch` | Terminal cancel; keep published files (not cancel_run) | **yes** |
+| `retry_batch` | Retry failed/interrupted items on the same job | **yes** |
+| `import_batch_outputs` | Import published outputs into the Library (no GPU) | **yes** |
+| `get_unreal_export_catalog` | Read the Unreal export catalog (empty is valid) | no |
+| `preflight_unreal_export` | Advisory Unreal-project preflight (same body as the Export modal) | no |
+| `export_to_unreal_project` | Export HDR (+ optional masters) into a paired Unreal project. Requires APP Unreal-project sink and actual M1 state. 300s, one attempt | **yes** |
+| `preflight_file_export` | Check exact source revision and proposed ordinary file destinations before export | no |
+| `export_render_file` | Export an ordinary render file after preflight and approval; create-only, 300s, one attempt | **yes** |
+| `get_layer_draft` | Inspect exact saved HEAD, draft, revision, active layer source pairs and take fingerprints | no |
+| `generate_layer` | Start one Generate Layer job on a saved render with stable request_id; no automatic land/commit | **yes** |
+| `get_layer_generation` | Poll an exact layer job, including ready or released terminal state | no |
+| `cancel_layer_generation` | Request cancellation of one exact layer job; optional `execution_target` defaults to saved; poll until released | **yes** |
+| `rematte_layer` | Re-matte or Keep rectangle from a retained RGB token; optional `execution_target` defaults to saved, while `target` selects the recovery take; uncertain acknowledgement is non-replayable | **yes** |
+| `land_generated_layer` | Land one exact ready pair into the witnessed v6 draft; no graph commit | **yes** |
+| `commit_layer_draft` | Explicitly bake the witnessed draft onto HEAD as a final Layers node | **yes** |
+| `preflight_spot_clone` | Inspect exact saved parent/HEAD and available shape, template, or render-local raster fingerprints | no |
+| `clone_spot` | Explicit saved clone with stable node id and mask witness; live only through approved prepared Copilot operation | **yes** |
+| `get_spot_clone` | Read one exact graph node/digest receipt after an uncertain clone result | no |
+| `list_hotkeys` | Read this app's device-local Hotkey profile, revision, and effective bindings | no |
+| `inspect_hotkey` | Inspect one Hotkey and optional candidate bindings | no |
+| `set_hotkey_bindings` | Replace one complete Hotkey alias list after a fresh read | **yes** |
+| `remove_hotkey_binding` | Remove one assigned Hotkey chord | **yes** |
+| `restore_hotkey` | Restore one Hotkey to its factory bindings | **yes** |
+| `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
+| `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
+| `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
+| `open_shader_workspace` | Acknowledge exact Project Shader attachment; v1 returns two native files, negotiated v2 returns the declared source set and metadata path. Follow installed `360-hextile` | **yes** |
+| `register_shader_update` | Register the acknowledged format-specific raw digest: v1 pair or complete v2 declared set, including unused helpers; automatic APP Prepare/compile checks, never Apply | **yes** |
+| `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
 
-## Project Git, history and accepted bundles
+### Selection guide
 
-One optional `.git` at the Project root holds many complete `shaders/<stable-id>/workspace/` trees and tracked `360-project.index.json`. Track every declared root/helper GLSL, metadata/config, Looks, provenance, referenced PNG texture and **all ordered sequence frames**, plus the optional original and referenced cover image. Ignore local `shader.json`, `documents/`, `checkpoints/`, asset-root `resources/`, `originals/` and `.local/` only after **every Shader covered** has verified portable workspace copies; mixed legacy Projects need explicit per-asset rules. Never ignore all JSON, `.360hextile`, workspace resources or authored paths. The optional templates at https://360hextile.com/static/templates/shaders/gitignore.txt and https://360hextile.com/static/templates/shaders/gitattributes.txt are Save As examples for the Project root; inspect before use, never overwrite policy. The attributes preserve workspace bytes and marker bytes with `-text`; optional LFS is separate and cloned objects must be materialized.
+1. **Handshake** → `get_capabilities` then `get_live_context` before compose.
+2. **Learn** → `get_guide` (`best-practices` then `workflow-schema`).
+3. **Discover** → `list_workflows` → pick `origin` + `id`.
+4. **Inspect** → `get_workflow` if you need defaults before overriding.
+5. **Plan** → `validate_config` with the same overrides you intend to run.
+6. **Need a source image from a prompt?** → `list_360_loras`, choose a listed preset, then `get_seed_memory_advice` before approved `generate_seed` with a fresh UUID; poll `get_seed_job` (below).
+7. **Run** → `run_workflow` → keep `run_id` → `get_status` until terminal (`completed` / `failed` / `cancelled` / `crashed`). Use `list_runs` if the id is lost.
+8. **Save a variant** → `save_workflow` (`user`/`project`, **new** id). Create-only; 409 means pick another id.
+9. **Abort** → `cancel_run`.
+10. **Many local images, one frozen recipe** → `preflight_batch` → `get_batch_preflight` → `start_batch` (not `run_workflow`, not a Sequence). Poll `get_batch`. Abort with `cancel_batch`.
 
-A clone discovers portable workspace drafts as **unaccepted** until fresh registration/Prepare/review/human Apply; it does not restore local accepted history, leases or capabilities. Preserve stable Project/Shader/Look IDs; an occupied Shader ID requires refusal or explicit Fork with a fresh ID. Native Git diff/commit/checkout/push runs only on the user's explicit instruction; MCP has no Git tool and neither registration nor Apply commits. Quiesce cooperating edits for a requested Git snapshot. Git restore changes drafts and requires fresh register/Prepare/review/Apply. Editor text Undo changes an unsaved draft; reviewed structural batches may be discarded; checkpoint Revert creates a new accepted revision; Git history does not substitute for any of these.
+### GPU diagnosis and retry
 
-`Export Shader Bundle` packages the exact **accepted** `.hexshader` snapshot: all declared GLSL (including unused helpers), metadata, every compatible Look, exact provenance, referenced resources and **every** ordered sequence frame with FPS/settings/dimensions, and an optional truthful original subject to distribution rights. It never exports dirty workspace bytes or Git HEAD. Missing/corrupt members or incompatible Looks refuse a complete export; do not offer a partial bundle as a fallback.
+Call `get_gpu_diagnostics` for the app's selected device and current status. The NVML card/process sample may be cached: read `accounting.nvml_sampled_at_unix_ms` and `nvml_sample_age_ms`; null means no valid NVML sample. Device use, per-process attribution, Torch/CuPy pools, and registered holder footprints overlap, so do not add them together or claim a workload will fit. WDDM can leave this-app attribution null; a holder's `busy_state=unknown` is not idle. Use a workload-specific estimator where available and keep its result advisory.
 
-## Legacy v1 pair: edit and register
+`retry_run(run_id)` is an ordinary retry. If the user explicitly requests idle-holder recovery for that failed render, explain that `retry_run(run_id, vram_recovery=true)` may evict idle in-app GPU holders for that exact render, then obtain the host's mutation approval for those exact arguments. Tool arguments such as `approved:true` are never approval. Do not offer process killing or unload-all as a diagnosis action.
 
-Edit `source.glsl` and `authoring.json` natively as one coherent batch. Preserve the existing inline manifest/ABI/schema and parameter declarations, unrelated extensions, resource identities/bytes, Looks and provenance. Keep the sidecar's closed top-level schema and immutable `base`; it contains `kind="360hextile.shader-workspace"`, `schema=1`, `base`, `values`, `capture_defaults`, `output`, `space`, `extensions`. Do not edit managed snapshots, `shader.json`, resources, a preset registry or any other file. Source is bounded to 64 KiB, sidecar and derived document to 2 MiB each; respect tighter acknowledged limits.
+### Model readiness and queue actions
 
-Compute the digest from **raw bytes in source-then-authoring order**, with no newline conversion, JSON normalization or text decoding. Substitute only the two acknowledged native paths:
+Read `get_model_readiness` and `get_model_download_queue` first. Disclose the exact `pipeline_id` / `model_id`, selected bundle members, and current queue state before asking the host for its existing mutation confirmation. `get_model_readiness.overrides` is for exploring fit only; refresh the default catalog without overrides before a bundle install. Fit compares estimated workload needs with total card capacity; use `get_gpu_diagnostics` to explain current free pressure separately.
 
-```python
-from pathlib import Path
-import hashlib
+For `install_model(bundle=true)`, use the selected primary's current default-catalog `selection_fingerprint` as `expected_selection_fingerprint`. The app checks it again at admission and rejects drift with 409. `bundle=false` queues only the named registry identity. `repair_model` names one registry identity; the app diagnoses files itself. Do not pass paths, URLs, or an `approved` flag. For `cancel_model_download`, use the `queue_entry_id` from the exact queued/active row as `expected_queue_entry_id`. A successful cancel response requests a stop; keep reading the queue until it settles. If an action acknowledgement is unknown, read the queue before any repeat. If the app lacks the fingerprint or queue-entry token, do not make the guarded action.
 
-source = Path(source_path).read_bytes()
-authoring = Path(authoring_path).read_bytes()
-framed = (b"360hextile.shader-workspace.v1\0"
-          + len(source).to_bytes(8, "big") + source
-          + len(authoring).to_bytes(8, "big") + authoring)
-content_digest = "sha256:" + hashlib.sha256(framed).hexdigest()
+### Generate Layer on a saved render
+
+Get approval for each mutation and keep the exact render, HEAD, draft, composition and revision from `get_layer_draft`. Use `generate_layer(target=saved, mode=generate, request_id=<32 lowercase hex>, ...)`, then poll `get_layer_generation` by that same id until `ready`. Ready is only an artifact; call `land_generated_layer(target=saved, layer_id=<stable pl_ id>, ...)` to insert one atom, then explicitly call `commit_layer_draft(target=saved, ...)` with the fresh revision if a graph node is wanted. Generation does not land, and land does not commit. An open studio-owned draft refuses saved mutation; MCP does not arm or retarget the viewer.
+
+For Re-gen or variation, inspect the active layer's exact bare `asset`, `recipeSource` and `takes_fingerprint`; Re-gen preserves pose and permits at most eight takes. The draft permits at most 64 layers. `rematte_layer` uses the retained `rgb_draft.token` and a server-minted job id; a lost reply is unknown and must not be replayed. If start, land, or commit loses its reply, reconcile by the original request/job/layer/draft ids and exact saved state before any newly approved attempt. A missing RAM job after restart remains unknown, not a reason to invent a new id. `cancel_layer_generation` requests stop; poll for terminal `released` before claiming the GPU job ended. Both job controls default to saved; `execution_target=live` is only for an approved internal Copilot child on the matching armed job, never external MCP. Re-matte's separate `target` remains the witnessed take to replace. External MCP live requests return 403.
+
+### Spot Clone on a saved render
+
+Read `preflight_spot_clone(render_id,parent_id)` and require its exact HEAD and final parent before asking for approval to write. Choose an explicit destination label and source/destination poses; the agent never selects them in the viewer. A shape mask has no fingerprint; a template or raster selector must carry the matching SHA-256 from preflight. `clone_spot(target=saved,...)` uses one stable 12-lowercase-hex `node_id`, no force or path/pixel upload. Read `get_spot_clone` by that same id after a lost response. A missing receipt remains unknown; never mint a new id or claim the graph write was cancelled. Stop prevents new calls but cannot undo an accepted graph node; use normal graph history/Undo for a completed node. External `target=live` is forbidden.
+
+### Device-local Hotkeys
+
+`list_hotkeys` reads the current profile, revision, effective bindings and availability;
+`inspect_hotkey` explains one action and optional candidate bindings, conflicts and overlaps.
+The app must be open; MCP Follow and a render document are not required.
+Bindings use `meta_key` for the Meta modifier and `slash` for the slash key.
+
+Start `list_hotkeys` with `{}`. Each page contains at most 20 actions plus `total`
+and `next_cursor`; pass that cursor unchanged on the next call until it is null.
+Pages share one profile revision. If continuation returns `stale_revision`,
+discard the partial listing and restart without a cursor.
+
+Read before every edit and approve the exact action, bindings and returned `revision`.
+`set_hotkey_bindings` replaces the complete alias list (`[]` unbinds),
+`remove_hotkey_binding` removes one assigned chord, `restore_hotkey` restores one
+customized row, and `reset_hotkeys` clears all overrides including inert unknown IDs.
+Reset leaves the separate single-key switch unchanged. Conflicts never silently
+reassign another action. A stale revision requires a fresh read and new approval.
+Only an explicit reset can replace a future-format profile.
+
+If a write returns `hotkeys_outcome_unknown`, its effect is uncertain. Never replay
+it automatically: re-read the profile, inspect the actual bindings, and obtain a
+new approval only if another mutation is still needed.
+
+## Upres
+
+GPU upres of a still, a folder, or a video → skill `upres` (`/360-hextile:upres` on Claude). Do not invent `upscale_image`. Do not send GPU upres through `hextile-pipe`.
+
+Stills use `run_workflow` with builtin `upres-still`. Folders and video use that skill's sequence door (`run_workflow` cannot create a `seq_*`). Recipes E (still) and F (folder/video) live in `get_guide` `recipes`.
+
+## Safety — overrides, never authority
+
+- Send **`workflow_id` + `overrides`** (and optional `output`). Prefer **not** composing a full raw config as authority.
+- The app deep-merges and validates. A bad override is a structured **422** — read it, fix the override, retry.
+- **List / array merge: REPLACE wholesale.** Overriding `passes[]`, `lora.models[]`, or any array **replaces** the template list; it does **not** append. To “add a LoRA”, include the full desired array (template entries you want to keep + your addition).
+- Live runs need a non-empty **`input.path`** after merge (empty path is only OK on dry_run).
+- `input.source` is `file` or `render` only.
+
+## Seed → run (two-step)
+
+`InputSource` is `file` | `render` only. Generative producers are **not** render-time sources.
+
+1. `list_360_loras` → pick `path`, `base_model`, and an exact listed `resolution_presets` width/height (`sdxl` | `sd15` | `flux_schnell` | `qwen_image`).
+2. `get_seed_memory_advice(lora_path, width, height, cpu_offload?)` → read its separate GPU snapshot and APP risk estimate. High/unknown risk never auto-selects CPU offload or low-VRAM override; the APP revalidates at admission.
+3. Obtain host mutation approval for the exact options; allocate a UUID, then `generate_seed(request_id, prompt, lora_path, base_model, n?, width?, height?, resolution_preset?, cpu_offload?, allow_low_vram?)` → short acknowledgement with `job_id`. A supplied preset is the listed `widthxheight` string matching the supplied dimensions; omit options to retain APP defaults.
+4. Poll `get_seed_job(job_id)` until terminal. Read `completed_variations` by each entry's original `index` (which may have gaps); choose the requested index and its absolute path. A missing index is unavailable, even if another variation succeeded.
+5. `run_workflow` with overrides:
+
+```json
+{
+  "input": {
+    "path": "/absolute/path/from/completed_variations[index=i]",
+    "source": "file"
+  }
+}
 ```
 
-After completing both writes, use `expected_generation=<returned generation>` and `change_id=handle+":"+str(expected_generation+1)`. Call `register_shader_update(handle, change_id, expected_generation, content_digest)`, with no source, paths or Apply flags. Keep this original tuple for reconciliation. Registration freezes the matching candidate, advances generation and **automatically** starts APP Prepare and mounted Workshop compile/preview; no Check click is required.
+Never write retired source types (`pattern`, `360_lora`, …) into render-time `input.source`.
 
-The opaque handle is ASCII alphanumeric/`_`/`-`, at most 64 characters and contains no colon. The suffix is positive canonical decimal, no leading zeros, at most 16 digits and at most `2**53-1`; bound length before integer conversion and require the exact handle namespace. New `expected_generation` is a nonnegative safe integer at most `2**53-2`. Encode the whole change ID, including its colon, as one URL path segment if constructing a transport URL. Never use UUIDs/arbitrary IDs, future gaps or generation wraparound.
+`generate_seed` submits to **`POST /api/360-lora/jobs`**. Keep the UUID and exact request body until the job is resolved. If its acknowledgement is uncertain, call `get_seed_job` with that UUID. A 404 while submission is outstanding is provisional: replay the same UUID and body or report unknown; never mint another ID automatically. `get_seed_job` exposes progress, original-index paths and seeds, and typed terminal errors. `completed`, `partial`, `cancelled`, `failed`, and `interrupted` are terminal; only `completed` means every requested variation succeeded. Historical `list_seed_history` / `get_seed_batch` read stored batches.
 
-On an unknown registration reply, read `get_shader_update(handle, change_id, project_context_witness=<acknowledged open witness>)`; if a replay is needed, use only the exact original ID/digest/expected generation. Retained exact replay returns its original receipt even after generation advances. Changed retained input is `409 idempotency_conflict`; a missing historical generation is `410 receipt_expired`, never permission to recreate it. Namespace, noncanonical suffix, suffix mismatch or future gap is `409 generation_conflict`. Preserve files and stop to rediscover when authority is unknown.
+`cancel_seed(job_id)` targets only that exact seed job. Undo of a live apply is studio `loadConfig`, not this tool. Follow GET-apply of a finished **run** may still paint sliders (accepted leftover).
 
-### Capability-aware authoring
+## App-down / upgrade recovery
 
-Use the acknowledged instructions' observed `available`, `executable_capabilities` and candidate `execution_ready`, independently of current document declarations. A clean nonconvention base may opt in when APP actually executes `conventions/1`; lacking a declaration is different from an unsupported runtime. Before executable support and its closed schema are observed, report unsupported rather than inventing definitions or promising Playable behavior.
+| Symptom | Meaning | What to tell the user |
+|---------|---------|------------------------|
+| Error contains “isn't running” / “Launch 360 Hextile” | Backend not up | Launch 360 Hextile, then retry |
+| “Upgrade 360 Hextile (needs workflows/run)” | App too old | Update the app to a build with workflow run |
+| HTTP 422 with validation detail | Bad overrides / missing input | Fix overrides; re-validate |
+| HTTP 402 | License gate | Activate license in Settings |
+| HTTP 409 on save | Id already exists | New id, or delete only if the user asked |
 
-With supported `conventions/1`, author the complete candidate in the same pair: inline parameter manifest and GLSL in `source.glsl`; values, document space, sorted `extensions.required_capabilities` including `conventions/1` and a fully resolved `extensions.conventions` in `authoring.json`. Capability admission reads sidecar extensions, not a source-header capability declaration or invented header/sidecar mirror check. Use shipped built-in preset resolution only when its resolved bytes are already in the document or supplied by the user, or already authorized current resolved Project-derived bytes; no Project profile read tool exists. Follow the returned closed schema and exact generated channel aliases. Intrinsic validation checks the definition itself; shader-bound validation checks parameter/channel/resource compatibility.
+The MCP process **stays up** when the app is down. Retry tools after launch — do not restart the agent session unless the user asks.
 
-Generated camera signatures are `vec3 hxCameraPosition`, `mat3 hxCameraRotation` and `vec3 hxCameraDirection(vec3 canonicalDirection)`. Non-null camera values are uniforms; null camera values are `const vec3(0.0)` and `const mat3(1.0)`. The direction helper returns `normalize(hxCameraRotation * canonicalDirection)`. `camera:null` gives identity camera helpers. A camera-aware ray marcher must explicitly wire `ro=hxCameraPosition` and `rd=hxCameraDirection(hx.direction)` into its own ray logic; helper presence alone does not move a scene. The host authors control data, never live pose, key presses or Interact arming.
+## Suggested happy path
 
-For “Make it when I press ENTER then we get a blast event”, create the entire parameter+GLSL+logical gate+binding+envelope+Range mapping in one candidate using Recipe J's control payload. In v1 its sidecar stays schema 1 with immutable `base`; in v2 merge that payload into the **acknowledged schema-2 metadata** while preserving `shader_id`, title/tags, entry, complete source/Look/provenance/original inventories and every unrelated extension. Do not require manual preset Apply to finish first creation. Teach the executable keyboard recipe first, only when APP is available, the complete candidate is execution_ready and both `conventions/1` and `modulation/2` are executable: resolved Enter key binding → stable default-0 logical gate ID → schema-2 `modulation/2` oneshot BLAST → existing Range mapping to Glow → declared parameter/default/bounds and GLSL glow term. BLAST uses finite 20 ms Linear Attack and 400 ms Ease Out Release, exponent 2. Keep sorted `conventions/1`, `master-clock/1`, `modulation/2` declarations and the default Master Clock object explicit. Obtain exact fields/aliases from current instructions and guides; do not invent ADSR/event fields. Preserve modulation schema 2 on later edits; workspace format and modulation schema are distinct contracts.
+```
+get_capabilities
+→ get_live_context
+→ get_guide(name="best-practices")
+→ list_workflows
+→ get_workflow(origin="builtin", id="quick-scout")
+→ validate_config(workflow_id="quick-scout", overrides={...})
+→ run_workflow(workflow_id="quick-scout", overrides={...})
+→ get_status(run_id=...)  # poll until terminal
+```
 
-Attack/Release are finite seconds `[0,60]`; each curve is `linear` (exponent 1), `ease_in`, `ease_out` or `ease_in_out` (exponent `[1,8]`, preset default 2). Use explicit settings, not omitted defaults. Held uses a default-0 gate and follows aggregate press/release; one-shot Burst retriggers from its current level without stacked voices. Attack and Release curves are independent; Recipe J’s Held alternative uses 200 ms Attack and 600 ms Release. Zero Attack is an instant Burst option. Burst (`mode="oneshot"`) finishes Attack → Release even after an early key release or a long hold; Held (`mode="held"`) sustains until aggregate release. Envelopes use monotonic interaction time, independent of Master Clock BPM/Speed and scene pause; keep the existing default clock object/declaration without inventing another clock capability gate. Repeated held key events are not fresh presses. Explain only the producer's observed retrigger/key-repeat behavior. Report shortcut conflicts and propose an explicit remap without pressing keys or changing Hotkeys.
+Prompt-only world (when a 360-LoRA is available):
 
-Conditionally, focused keyboard, a future MIDI note, OSC `/blast` with sender event identity or an observed gamepad button may target the same typed input through INPUT session routes **only when those adapters are installed and admitted**. Portable conventions sources remain keyboard/mouse; never put MIDI/OSC/gamepad source kinds, source epochs/sequences, device addresses, session routes or live packets in either file. Known schemas/declarations do not prove installed adapters. The active host orders/deduplicates observations per source epoch/sequence, ORs held contributors, emits `down` for first press, `trigger` for another fresh press, no edge for intermediate release and `up` for last release. Trigger-only pulses do not hold. Disconnect removes only that source's contributions; healthy sibling holds remain. Burst promises neither stacked voices nor two visible pulses.
+```
+list_360_loras → generate_seed(request_id=<UUID>, ...) → get_seed_job(job_id)
+→ pick completed_variations entry with index=0 when available
+→ run_workflow(..., overrides={ input: { path, source: "file" }, prompt: {...} })
+→ get_status
+```
 
-Legacy `propose_shader` and Copilot Board rows must preserve convention bytes, envelope rows/input refs/settings/envelope-sourced mappings and Playable capability declarations. Their existing schema-1 typed time/click/clock operations do not create envelopes. First creation or revision uses only the current server-attested workspace; no model flag grants that exception.
+## curl fallback (no MCP)
 
-## Poll and repair
+If the MCP server cannot start (no python3), agents may use HTTP directly:
 
-Poll `get_shader_update(handle, change_id, project_context_witness=<witness returned by acknowledged open>)`. Do not replace that witness with a fresh discovery witness to revive an old handle. Require the receipt to identify the exact candidate, generation, content_digest and current check_attempt; use its separate `prepare`, `compile`, `preview`, `presentation`, `save`, `attachment_state`, reason and diagnostics. Report missing fields as unknown.
+```bash
+# Catalog
+curl -s http://127.0.0.1:8000/api/workflows
+curl -s http://127.0.0.1:8000/api/workflows/capabilities
 
-For pending results honor `next_poll_ms`, with backoff capped between 250 ms and 2 s. Bound each candidate to at most 60 seconds from registration and stop at the earlier `check_deadline_at`; polling never extends the deadline. A terminal unavailable compiler, unsupported capability, stalled pending, permission/attachment loss, user Stop or generation exhaustion ends the turn. Do not repair unsupported runtime into a claimed pass without changed observed runtime support.
+# One template
+curl -s http://127.0.0.1:8000/api/workflows/builtin/quick-scout
 
-If candidate/digest-bound Prepare fails intrinsic or shader-bound schema/binding/parameter admission, or actual compile fails, read diagnostics' phase, severity, file, line, column and bounded raw driver log when present. A valid container with malformed input/settings/mappings can register before semantic Prepare fails. Malformed/orphaned inputs, default-1 gates, missing declarations or targets and compiler errors all use this same loop. Do not invent a line or assume prepare failure is compile failure.
+# Validate (dry_run)
+curl -s -X POST http://127.0.0.1:8000/api/workflows/run \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow_id":"quick-scout","origin":"builtin","dry_run":true,"overrides":{}}'
 
-Repair only acknowledged editable members where diagnostics support a safe edit: the native pair in v1, or the declared source files and schema-2 metadata/Look/provenance members in v2. Complete the full negotiated member set, recompute its format-specific raw digest (including unused helpers in v2) and re-register in this same host turn using **returned_generation** as expected_generation and `handle+":"+str(returned_generation+1)` as a fresh ID. Then poll the new candidate. Permit at most **three repair attempts after the initial registration** (four candidates total), without an intermediate Check click. Stop early on exact current compile pass; otherwise end on exhaustion or any terminal condition with the last real receipt/diagnostics. No safe repair also ends the turn.
+# Run
+curl -s -X POST http://127.0.0.1:8000/api/workflows/run \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow_id":"quick-scout","origin":"builtin","dry_run":false,"overrides":{"input":{"path":"/abs/seed.png","source":"file"}}}'
 
-Never equate disk-written, registered, Prepare passed, compile passed, preview published, presentation shown, painted pixels, saved in Hextile or Git committed. Compiler success does not prove visual correctness, physical Enter behavior or timing. Last-known-good pixels do not certify current bytes. A preview failure/unavailable result is reported separately even if compilation passed.
+# Status / list / cancel
+curl -s http://127.0.0.1:8000/api/renders/<run_id>
+curl -s 'http://127.0.0.1:8000/api/renders/?lifecycle_status=active'
+curl -s -X POST http://127.0.0.1:8000/api/renders/<run_id>/stop
 
-## Recovery and Retry
+# Persist (user shelf, create-only)
+curl -s -X POST http://127.0.0.1:8000/api/workflows/user \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"my-scout","document":{}}'
 
-Preserve authored files for every refusal. No recovery silently installs software, changes host permissions, overwrites files, retries Apply or claims that APP stopped the model.
+# Seed (360-LoRA)
+curl -s http://127.0.0.1:8000/api/360-lora/loras
+curl -s -X POST http://127.0.0.1:8000/api/360-lora/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"request_id":"00000000-0000-4000-8000-000000000001","prompt":"...","lora_path":"...","base_model":"sdxl","num_variations":4}'
+curl -s http://127.0.0.1:8000/api/360-lora/jobs/00000000-0000-4000-8000-000000000001
+```
 
-| Result | Recovery |
-|---|---|
-| 403 Follow/grant/lease absent | Identify the existing MCP Follow/whole-asset source_read/propose UI grant needed; wait for the human, then rediscover. |
-| 409 `attachment_not_ready` | Human resolves dirty draft with Save/Discard or reopens Workshop. Skill invocation alone never authorizes these UI actions. |
-| 503 `attachment_unavailable` | Restore APP/transport, rediscover; a notice or timeout proves no ownership. |
-| 409 `attachment_conflict` | Rediscover current holder and identity without overwriting files. |
-| Other 409 context/base/generation/idempotency/digest/collection conflict | Read exact reason. Reconcile original receipt or rediscover exact identity; finish stable writes across the negotiated member inventory and recompute its raw digest (the pair only for v1). Never reuse a changed retained ID or guess current authority. |
-| 410 expired/evicted receipt or workspace | Preserve files, rediscover current surface/grants and explicitly reattach/adopt as required. No receipt recreation or automatic adoption. |
-| 413 byte/document limits | Report the acknowledged limits; reduce only the requested candidate if safely possible, never truncate resource data or unknown fields. |
-| 422 shape/schema/policy/resource refusal | Read exact reason; correct only permitted authoring data. Admission refusal has no new generation; candidate-bound semantic failures use the repair loop. |
-| Other 503 storage/check unavailable or terminal unsupported execution | Report real receipt/reason, stop and identify the unavailable support. Do not substitute a static pass. |
+## Not in this plugin
 
-On timeout/stall/exhaustion report the exact last handle/change ID/generation/digest/check_attempt, separate states, reason and last diagnostics, then offer **Retry**: “Re-enter the installed `360-hextile` skill in this same coding host with ‘Retry the Shader change’ and the prior receipt.” Check the host's actual invocation syntax. A new host turn rediscovers authority before continuing preserved files; expired authority requires reattachment and explicit adoption where needed. APP Retry only rechecks the same candidate with a fresh check attempt; it cannot wake an idle CLI or restart reasoning. A notification does not restart an idle host either. On user Stop stop new edits/calls; do not assert already-admitted compute or external reasoning was cancelled by APP.
+`start_wizard`, `compile_config`, `upscale_image`, `list_worlds`, `list_presets`, run-ledger resume, in-place workflow UPDATE, Pattern generate. Do not invent those tools. Batch is the eleven `*_batch*` tools above — not `run_workflow` per file, not a Sequence, not `/api/batch-convert`. Never put a Batch job id into `get_status` / `cancel_run`.
 
-## Human Apply
+## Min app version
 
-Leave the exact passing candidate, including controls, modulators, parameter/value and source changes beside its exact check status, for the human's Workshop review and **Apply**. Never self Apply, synthesize an approval, arm Interact or save via another tool. Source/check grants do not authorize durable saving. Human Apply rechecks current Project/base/grants and actual candidate-bound compile proof through APP's existing authority/CAS door.
-
-Report saved only after an exact server-observed `save="saved"` receipt with accepted revision/hash. An unknown save remains unknown until reconciled; never replay a save mutation. APP advances the handle's accepted base after acknowledged Apply; **v1 alone** retains the sidecar's original immutable `base`, while v2 `authoring.json` has no saved-base field. Git commit is a separate user-authorized action and cannot be inferred from Apply.
+Requires 360 Hextile with **workflow automation P0** (`POST /api/workflows/run` + dry_run). Plugin package version: see `.claude-plugin/plugin.json`.

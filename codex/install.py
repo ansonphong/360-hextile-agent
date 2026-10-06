@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Idempotent Codex twin installer for hextile-agent.
+"""Idempotent Codex twin installer for the 360-hextile plugin.
 
 Writes:
-  ~/.agents/skills/360-hextile/SKILL.md
-  ~/.agents/skills/360-hextile/.hextile-agent-marker
-  ~/.agents/skills/hextile/SKILL.md
-  ~/.agents/skills/hextile/.hextile-agent-marker  (version marker)
-  ~/.agents/skills/hextile-upres/SKILL.md
-  ~/.agents/skills/hextile-upres/.hextile-agent-marker
+  ~/.agents/skills/360-hextile/SKILL.md + references/  (marker .hextile-agent-marker)
+  ~/.agents/skills/shader/SKILL.md
+  ~/.agents/skills/upres/SKILL.md
+  (removes marker-owned pre-0.5.0 ~/.agents/skills/hextile and hextile-upres)
   [mcp_servers.hextile] into ~/.codex/config.toml  (stdio only)
 
 Usage:
@@ -27,10 +25,12 @@ import shutil
 import sys
 from pathlib import Path
 
-PACKAGE_VERSION = "0.4.0"
+PACKAGE_VERSION = "0.5.0"
 MIN_CODEX = "0.34.0"
 MARKER_NAME = ".hextile-agent-marker"
-SKILL_NAMES = ("hextile", "hextile-upres", "360-hextile")
+SKILL_NAMES = ("360-hextile", "shader", "upres")
+# Pre-0.5.0 skill folders. Removed only when marker-owned.
+LEGACY_SKILL_NAMES = ("hextile", "hextile-upres")
 MCP_SECTION = "mcp_servers.hextile"
 BEGIN_MARK = "# >>> hextile-agent begin (do not edit between markers)"
 END_MARK = "# <<< hextile-agent end"
@@ -41,7 +41,7 @@ def package_root() -> Path:
 
 
 def skill_source() -> Path:
-    return package_root() / "skills" / "hextile" / "SKILL.md"
+    return package_root() / "skills" / "360-hextile" / "SKILL.md"
 
 
 def mcp_script() -> Path:
@@ -64,7 +64,7 @@ def write_agents_fragment() -> Path:
     out = package_root() / "codex" / "AGENTS-fragment.md"
     body = strip_frontmatter(src)
     header = (
-        "<!-- Generated from skills/hextile/SKILL.md — edit SKILL.md only, "
+        "<!-- Generated from skills/360-hextile/SKILL.md — edit SKILL.md only, "
         "then re-run: python3 codex/install.py --write-fragment -->\n\n"
     )
     out.write_text(header + body, encoding="utf-8")
@@ -139,7 +139,21 @@ def ensure_skills(home: Path, dry_run: bool) -> Path:
                 raise SystemExit(f"Refusing conflicting skill destination: {target}")
     for name in SKILL_NAMES:
         _copy_skill_dest(home, name, dry_run)
-    return home / ".agents" / "skills" / "hextile"
+    _remove_legacy_skills(home, dry_run)
+    return home / ".agents" / "skills" / "360-hextile"
+
+
+def _remove_legacy_skills(home: Path, dry_run: bool) -> None:
+    for name in LEGACY_SKILL_NAMES:
+        dest = home / ".agents" / "skills" / name
+        marker = dest / MARKER_NAME
+        if (
+            dest.is_dir() and not dest.is_symlink()
+            and marker.is_file() and not marker.is_symlink()
+        ):
+            _rmtree(dest, dry_run)
+        elif dest.exists() or dest.is_symlink():
+            print(f"Leaving unowned {dest}")
 
 
 def patch_config(config_path: Path, script: Path, dry_run: bool) -> None:
@@ -200,6 +214,7 @@ def uninstall(home: Path, dry_run: bool) -> None:
             print(f"Leaving unowned {dest}")
         else:
             print(f"No skills dir at {dest}")
+    _remove_legacy_skills(home, dry_run)
 
     # Marker-owned leftover from pre-0.2.1 (~/.codex/skills/hextile). Never
     # delete an unmarked tree or sibling files.
@@ -253,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     home = args.home if args.home is not None else Path(os.path.expanduser("~"))
 
     print(
-        f"hextile-agent Codex installer v{PACKAGE_VERSION} "
+        f"360-hextile Codex installer v{PACKAGE_VERSION} "
         f"(requires Codex >= {MIN_CODEX}; stdio MCP only)"
     )
 

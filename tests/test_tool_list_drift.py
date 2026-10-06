@@ -611,7 +611,7 @@ def test_model_http_errors_remain_tool_errors(status: int) -> None:
 
 
 def test_skill_tool_names_subset_of_mcp() -> None:
-    skill = (ROOT / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
+    skill = (ROOT / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
     tools_section = re.search(
         r"^## Tools$(.*?)(?=^## |\Z)", skill, re.MULTILINE | re.DOTALL
     )
@@ -655,7 +655,7 @@ def test_codex_installer_toml_escapes_mcp_script_path(tmp_path: Path) -> None:
 
 
 def test_skill_has_no_stale_spellings() -> None:
-    skill = (ROOT / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
+    skill = (ROOT / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
     # Stale spellings must not appear as positive instructions.
     # "not `/api/lora-360`" is allowed once as a negation — flag raw path usage.
     assert ".workflow.json" not in skill
@@ -785,7 +785,7 @@ def test_mcp_initialize() -> None:
     )
     assert resp is not None
     assert resp["result"]["serverInfo"]["name"] == "hextile"
-    assert resp["result"]["serverInfo"]["version"] == "0.4.0"
+    assert resp["result"]["serverInfo"]["version"] == "0.5.0"
     assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert "tools" in resp["result"]["capabilities"]
     instructions = resp["result"]["instructions"]
@@ -1073,7 +1073,7 @@ def test_mcp_get_guide_and_save_builtin() -> None:
 
 def test_codex_install_copies_references(tmp_path: Path) -> None:
     INSTALL_MODULE.ensure_skills(tmp_path, dry_run=False)
-    dest = tmp_path / ".agents" / "skills" / "hextile" / "references" / "best-practices.md"
+    dest = tmp_path / ".agents" / "skills" / "360-hextile" / "references" / "best-practices.md"
     assert dest.is_file()
     assert "Authority" in dest.read_text(encoding="utf-8")
 

@@ -1,7 +1,7 @@
 # Agent lexicon (K2)
 
-One vocabulary for Desktop Copilot and MCP. Install id: **`hextile-agent@360-hextile`**.
-Marketplace name `360-hextile` (frozen). MCP `SERVER_NAME` / skill token `hextile`.
+One vocabulary for Desktop Copilot and MCP. Install id: **`360-hextile@360-hextile`**.
+Marketplace name `360-hextile` (frozen). MCP `SERVER_NAME` `hextile`; hub skill `360-hextile`.
 Do not teach `hextile@360-hextile`.
 
 ## Locked words
@@ -67,4 +67,4 @@ REFUSE_IDENTITY
 - FE RAM studio slot (preview-slot). `doc_generation` is the FNV-1a hex **string** of the identity-stripped live export.
 - Apply-live body `{config_partial, doc_generation, explanation}`. Ticket; FE merge-then-apply.
 - Empty or expired slot → 403 `studio_not_present`. Slot TTL 30s. FE heartbeat 10s. `pagehide` DELETE. Ticket TTL same clock. Follow OFF or empty republish drops leftover tickets. `startFollow` consumes leftover tickets before poll; busy follow does not consume.
-- Install id `hextile-agent@360-hextile`. Do not rewrite committed `.mcp.json`.
+- Install id `360-hextile@360-hextile`. Do not rewrite committed `.mcp.json`.
