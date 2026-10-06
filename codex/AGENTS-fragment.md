@@ -4,7 +4,7 @@
 
 Drive **360 Hextile** (desktop app) while it is running on this machine. Tools talk to `http://127.0.0.1:8000` through the `hextile` MCP server. **The server owns config authority** — merge, `HextileConfig` validation, and queueing happen in the app, not in this plugin.
 
-Install id: **`360-hextile@360-hextile`**. Marketplace `360-hextile`. Skill `360-hextile`. MCP token `hextile`. Do not install `hextile@360-hextile` or `hextile-agent@360-hextile` (old name).
+Install id: **`360-hextile@360-hextile`**. Marketplace `360-hextile`. Skill `360-hextile`. MCP token `hextile`. Do not install `hextile@360-hextile`.
 
 See `references/agent-lexicon.md` for locked words, the complementarity card, and `REFUSE_*` strings.
 
