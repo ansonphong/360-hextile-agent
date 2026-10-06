@@ -31,6 +31,25 @@ INSTALL = importlib.util.module_from_spec(INSTALL_SPEC)
 INSTALL_SPEC.loader.exec_module(INSTALL)
 
 
+@pytest.fixture(autouse=True)
+def isolated_generated_fragment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Exercise the real generator without rewriting the checked-in fragment."""
+    isolated_root = tmp_path / "fragment-package"
+    skill = isolated_root / "skills" / "hextile" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "skills" / "hextile" / "SKILL.md", skill)
+    (isolated_root / "codex").mkdir()
+    actual_generator = INSTALL.write_agents_fragment
+
+    def generate_in_tmp() -> Path:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(INSTALL, "package_root", lambda: isolated_root)
+            return actual_generator()
+
+    monkeypatch.setattr(INSTALL, "write_agents_fragment", generate_in_tmp)
+    return isolated_root / "codex" / "AGENTS-fragment.md"
+
+
 def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> None:
     rc = INSTALL.main(["--home", str(tmp_path)])
     assert rc == 0
@@ -240,12 +259,13 @@ def test_uninstall_preserves_symlinked_legacy_ownership(tmp_path: Path, link: st
     assert legacy.exists()
 
 
-def test_fragment_tracks_legacy_hub_and_source_versions_agree() -> None:
-    assert INSTALL.main(["--write-fragment"]) == 0
-    fragment = (ROOT / "codex" / "AGENTS-fragment.md").read_text(encoding="utf-8")
-    assert fragment.split("\n\n", 1)[1] == INSTALL.strip_frontmatter(
+def test_fragment_tracks_legacy_hub_and_source_versions_agree(isolated_generated_fragment: Path) -> None:
+    committed = (ROOT / "codex" / "AGENTS-fragment.md").read_text(encoding="utf-8")
+    assert committed.split("\n\n", 1)[1] == INSTALL.strip_frontmatter(
         (ROOT / "skills" / "hextile" / "SKILL.md").read_text(encoding="utf-8")
     )
+    assert INSTALL.main(["--write-fragment"]) == 0
+    assert isolated_generated_fragment.read_text(encoding="utf-8") == committed
     manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     server = ast.parse((ROOT / "mcp" / "hextile_mcp.py").read_text(encoding="utf-8"))
     server_version = next(
