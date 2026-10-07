@@ -35,6 +35,7 @@ from hextile_client import (  # noqa: E402
     HextileClientError,
     error_payload,
     validate_shader_proposal,
+    validate_shader_doctor,
     validate_shader_workspace,
 )
 
@@ -121,6 +122,8 @@ TOOL_NAMES = (
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
+    "request_shader_doctor",
+    "get_shader_doctor",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -163,6 +166,7 @@ _READ_ONLY = frozenset(
         "get_spot_clone",
         "get_shader_context",
         "get_shader_update",
+        "get_shader_doctor",
     }
 )
 _MUTATING = frozenset(
@@ -206,6 +210,7 @@ _MUTATING = frozenset(
         "propose_shader",
         "open_shader_workspace",
         "register_shader_update",
+        "request_shader_doctor",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -1789,6 +1794,23 @@ TOOLS: list[dict[str, Any]] = [
         {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE, "project_context_witness": _WORKSPACE_WITNESS,
          "include_source_diagnostics": {"type": "boolean", "default": False}},
         required=["handle", "change_id", "project_context_witness"]),
+    _tool_def("request_shader_doctor",
+        "Request one GPU Doctor pass for the clean, currently previewed Shader in the mounted Workshop. "
+        "Requires Follow and a current whole-asset capture grant; builtin, My Library and Project are eligible. "
+        "Submit a new UUID once. On an uncertain reply, poll get_shader_doctor with the same request_id; never retry automatically.",
+        {"request_id": {"type": "string", "format": "uuid"},
+         "origin": {"type": "string", "enum": ["builtin", "user", "project"]},
+         "shader_id": {"type": "string", "minLength": 1, "maxLength": 128},
+         "project_context_witness": {"type": "string", "minLength": 1, "maxLength": 256},
+         "studio_surface_id": {"type": "string", "minLength": 1, "maxLength": 256}},
+        required=["request_id", "origin", "shader_id", "project_context_witness", "studio_surface_id"]),
+    _tool_def("get_shader_doctor",
+        "Poll one exact Shader Doctor request receipt. Pending and running never start GPU work; "
+        "success returns bounded diagnostics without source, pixels or overlay mask. "
+        "Use the original request_id and Project witness, including after an uncertain POST reply.",
+        {"request_id": {"type": "string", "format": "uuid"},
+         "project_context_witness": {"type": "string", "minLength": 1, "maxLength": 256}},
+        required=["request_id", "project_context_witness"]),
 ]
 
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
@@ -2025,6 +2047,8 @@ class HextileMcpServer:
             "open_shader_workspace": self._open_shader_workspace,
             "register_shader_update": self._register_shader_update,
             "get_shader_update": self._get_shader_update,
+            "request_shader_doctor": self._request_shader_doctor,
+            "get_shader_doctor": self._get_shader_doctor,
         }
         self._handlers.update({
             name: (lambda args, op=op: self.client.hotkeys_request(op, args))
@@ -2695,6 +2719,14 @@ class HextileMcpServer:
     def _get_shader_update(self, args: dict[str, Any]) -> Any:
         validate_shader_workspace("get", args)
         return self.client.get_shader_update(args)
+
+    def _request_shader_doctor(self, args: dict[str, Any]) -> Any:
+        validate_shader_doctor("request", args)
+        return self.client.request_shader_doctor(args)
+
+    def _get_shader_doctor(self, args: dict[str, Any]) -> Any:
+        validate_shader_doctor("get", args)
+        return self.client.get_shader_doctor(args)
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

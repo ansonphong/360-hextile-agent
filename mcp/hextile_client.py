@@ -53,6 +53,25 @@ _WORKSPACE_SUFFIX = re.compile(r"[1-9][0-9]{0,15}\Z")
 MAX_WORKSPACE_GENERATION = 2**53 - 1
 
 
+def validate_shader_doctor(operation: str, args: Mapping[str, Any]) -> None:
+    """Validate the exact request identity before contacting the mounted Studio."""
+    required = ({"request_id", "origin", "shader_id", "project_context_witness", "studio_surface_id"}
+                if operation == "request" else {"request_id", "project_context_witness"})
+    if not isinstance(args, Mapping) or set(args) != required:
+        raise HextileClientError("Expected closed Shader Doctor arguments", kind="other", status_code=422)
+    request_id = args["request_id"]
+    try:
+        valid_id = type(request_id) is str and str(uuid.UUID(request_id)) == request_id
+    except (ValueError, AttributeError):
+        valid_id = False
+    if not valid_id or any(type(args[key]) is not str or not 1 <= len(args[key]) <= 256
+                           for key in required - {"request_id"}):
+        raise HextileClientError("Invalid Shader Doctor request identity", kind="other", status_code=422)
+    if operation == "request" and (args["origin"] not in {"builtin", "user", "project"}
+                                   or len(args["shader_id"]) > 128):
+        raise HextileClientError("Invalid Shader Doctor shader identity", kind="other", status_code=422)
+
+
 def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
     """Closed transport admission; APP owns grants, replay and saved-base checks."""
     def refuse(message: str = "Expected closed Shader workspace arguments") -> None:
@@ -760,6 +779,44 @@ class Client:
         return self.post_json(
             "/api/agent/shader-proposals",
             dict(body),
+            headers={"X-Hextile-Agent": "mcp"},
+        )
+
+    def request_shader_doctor(self, args: Mapping[str, Any]) -> Any:
+        """Submit once; an uncertain outcome is reconciled only by exact-ID GET."""
+        validate_shader_doctor("request", args)
+        request_id = args["request_id"]
+        try:
+            receipt = self.request_json(
+                "POST", "/api/agent/shader-doctor/requests", dict(args),
+                headers={"X-Hextile-Agent": "mcp"},
+            )
+        except http.client.HTTPException as exc:
+            raise HextileClientError(
+                f"Shader Doctor outcome unknown for request_id={request_id}; poll get_shader_doctor with this ID. Do not resubmit automatically.",
+                kind="shader_doctor_outcome_unknown", receipt={"request_id": request_id},
+            ) from exc
+        except HextileClientError as exc:
+            if exc.kind == "app_down" or (exc.kind == "other" and exc.status_code is not None
+                                          and 200 <= exc.status_code < 300):
+                raise HextileClientError(
+                    f"Shader Doctor outcome unknown for request_id={request_id}; poll get_shader_doctor with this ID. Do not resubmit automatically.",
+                    kind="shader_doctor_outcome_unknown", receipt={"request_id": request_id},
+                ) from exc
+            raise
+        if not isinstance(receipt, dict) or receipt.get("request_id") != request_id:
+            raise HextileClientError(
+                f"Shader Doctor acknowledgement unknown for request_id={request_id}; poll get_shader_doctor with this ID.",
+                kind="shader_doctor_outcome_unknown", receipt={"request_id": request_id},
+            )
+        return receipt
+
+    def get_shader_doctor(self, args: Mapping[str, Any]) -> Any:
+        """Read the exact request receipt; this never starts another GPU pass."""
+        validate_shader_doctor("get", args)
+        return self.get_json(
+            f"/api/agent/shader-doctor/requests/{args['request_id']}",
+            params={"project_context_witness": args["project_context_witness"]},
             headers={"X-Hextile-Agent": "mcp"},
         )
 

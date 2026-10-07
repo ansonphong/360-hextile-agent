@@ -19,6 +19,12 @@ Accept the user's requested Shader change as natural language. Resolve identity 
 
 If APP is down, say **Launch 360 Hextile, then retry**. For missing MCP, point to the package README's host install/reconnect instructions; do not install, restart APP or change host permissions on the user's behalf. Grants constrain APP disclosure, ingestion and Apply; they are not a filesystem sandbox for the coding host.
 
+## On-demand 360 Doctor
+
+This diagnostic action is separate from the file-authoring procedure below. A clean, currently previewed **Builtin, My Library or Project** Shader may be diagnosed without a source-read grant or native file access. Ask the user before starting GPU work. Discover the current Shader, `project_context_witness` and `studio_surface_id` through `get_live_context`; require Follow ON and a current whole-asset grant with `capture=true`. A dirty/saving draft or missing matching preview must stop.
+
+Call `request_shader_doctor` once with a new UUID `request_id` and that exact Shader identity, witness and surface. Keep the ID. Poll `get_shader_doctor(request_id, project_context_witness)` while the receipt is `pending` or `running`, stopping at its `expires_at`. A lost or uncertain POST reply is reconciled by GET with the **original** ID; never automatically resubmit or mint a replacement. Report `refused` or `unknown` honestly. A `succeeded` receipt contains the report ID, four metrics, thresholds, severity and frozen identity; it contains no mask, pixels or source. A new request after `unknown` needs a fresh user decision.
+
 ## Discover
 
 1. Inspect host MCP `tools/list` for `get_capabilities`, `get_live_context`, `get_shader_context`, `get_guide`, `open_shader_workspace`, `register_shader_update` and `get_shader_update`. Missing names mean an incompatible installed connector; report the missing names. Do not invent flags or capabilities in `get_capabilities`.

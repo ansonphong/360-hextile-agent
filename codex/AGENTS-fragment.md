@@ -121,6 +121,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `open_shader_workspace` | Acknowledge exact Project Shader attachment; v1 returns two native files, negotiated v2 returns the declared source set and metadata path. Follow installed `360-hextile` | **yes** |
 | `register_shader_update` | Register the acknowledged format-specific raw digest: v1 pair or complete v2 declared set, including unused helpers; automatic APP Prepare/compile checks, never Apply | **yes** |
 | `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
+| `request_shader_doctor` | Start one on-demand GPU Doctor pass for the clean, previewed Builtin, My Library or Project Shader with a capture grant; keep the UUID for polling | **yes** |
+| `get_shader_doctor` | Poll the exact Doctor request UUID and witness for bounded diagnostics without source, pixels or overlay mask | no |
 
 ### Selection guide
 

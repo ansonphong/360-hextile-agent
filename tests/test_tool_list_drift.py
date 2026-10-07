@@ -132,6 +132,8 @@ EXPECTED_TOOLS = (
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
+    "request_shader_doctor",
+    "get_shader_doctor",
 )
 
 
@@ -195,6 +197,9 @@ def test_open4_annotations_partition() -> None:
     assert "propose_shader" in _MUTATING
     assert "propose_shader" not in _DESTRUCTIVE
     assert "get_shader_update" in _READ_ONLY
+    assert "get_shader_doctor" in _READ_ONLY
+    assert "request_shader_doctor" in _MUTATING
+    assert "request_shader_doctor" not in _DESTRUCTIVE
     assert {"open_shader_workspace", "register_shader_update"} <= _MUTATING
     assert not {"open_shader_workspace", "register_shader_update"} & _DESTRUCTIVE
 

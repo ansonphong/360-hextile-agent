@@ -30,6 +30,72 @@ def _schema(name: str) -> dict[str, Any]:
     return next(tool for tool in TOOLS if tool["name"] == name)
 
 
+_DOCTOR_ID = "123e4567-e89b-42d3-a456-426614174000"
+_DOCTOR_REQUEST = {"request_id": _DOCTOR_ID, "origin": "builtin", "shader_id": "aurora",
+                   "project_context_witness": "wit", "studio_surface_id": "surface"}
+
+
+def test_shader_doctor_closed_tools_and_exact_poll() -> None:
+    request_schema = _schema("request_shader_doctor")
+    get_schema = _schema("get_shader_doctor")
+    poll = {"request_id": _DOCTOR_ID, "project_context_witness": "wit"}
+    jsonschema.validate(_DOCTOR_REQUEST, request_schema["inputSchema"])
+    jsonschema.validate(poll, get_schema["inputSchema"])
+    assert request_schema["annotations"]["readOnlyHint"] is False
+    assert get_schema["annotations"]["readOnlyHint"] is True
+    for schema, args in ((request_schema, _DOCTOR_REQUEST), (get_schema, poll)):
+        assert schema["inputSchema"]["additionalProperties"] is False
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({**args, "source": "private"}, schema["inputSchema"])
+
+    seen: list[Any] = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self.payload).encode()
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        seen.append(req)
+        return Response({"request_id": _DOCTOR_ID, "status": "pending", "expires_at": 100})
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    assert server._request_shader_doctor(_DOCTOR_REQUEST)["status"] == "pending"
+    assert server._get_shader_doctor(poll)["request_id"] == _DOCTOR_ID
+    assert [req.get_method() for req in seen] == ["POST", "GET"]
+    assert json.loads(seen[0].data) == _DOCTOR_REQUEST
+    assert seen[0].full_url.endswith("/api/agent/shader-doctor/requests")
+    assert seen[1].full_url.endswith(f"/api/agent/shader-doctor/requests/{_DOCTOR_ID}?project_context_witness=wit")
+    assert all(req.get_header("X-hextile-agent") == "mcp" for req in seen)
+
+
+def test_shader_doctor_uncertain_post_preserves_id_without_retry() -> None:
+    for failure in (urllib.error.URLError(TimeoutError("timed out")), http.client.RemoteDisconnected("lost")):
+        seen: list[Any] = []
+
+        def opener(req: Any, timeout: Any = None) -> Any:
+            seen.append(req)
+            raise failure
+
+        with pytest.raises(HextileClientError) as caught:
+            Client(opener=opener).request_shader_doctor(_DOCTOR_REQUEST)
+        assert caught.value.kind == "shader_doctor_outcome_unknown"
+        assert caught.value.receipt == {"request_id": _DOCTOR_ID}
+        assert _DOCTOR_ID in str(caught.value)
+        assert len(seen) == 1
+
+
+
 
 def _proposal() -> dict[str, Any]:
     return {
