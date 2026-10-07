@@ -71,9 +71,16 @@ A local checkout still works: `grok plugin marketplace add /path/to/hextile-agen
 
 ## Install — Codex
 
-From the 360 Hextile catalog (`ansonphong/360-hextile-plugins`): `codex plugin marketplace add <path-or-github>` then `codex plugin add 360-hextile@360-hextile`.
+Primary — use a current Codex CLI with `codex plugin` support:
 
-Standalone — clone this repo and run the installer:
+```bash
+codex plugin marketplace add ansonphong/360-hextile-plugins
+codex plugin add 360-hextile@360-hextile
+```
+
+This installs the bundled skills and `hextile` stdio MCP proxy. Git and Python 3.9 or newer are prerequisites, and `python3` must be available to the agent. Start a new Codex session and check `/mcp` for `hextile`, with 360 Hextile open on the same computer at `127.0.0.1:8000`. No separate clone or Python installer is needed for this route.
+
+Alternative manual setup — clone this repo and run the installer:
 
 ```bash
 git clone https://github.com/ansonphong/360-hextile-agent.git
@@ -97,7 +104,7 @@ python3 codex/install.py --uninstall
 
 Restart Codex and run `/mcp` — you should see `hextile`.
 
-Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
+The manual installer requires **Codex ≥ 0.34.0**. The MCP proxy uses **stdio** (no streamable HTTP dual-stack).
 
 ## /360-hextile:upres
 

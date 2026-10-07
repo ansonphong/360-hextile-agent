@@ -1,0 +1,13 @@
+{
+  "name": "360-hextile",
+  "version": "0.5.3",
+  "description": "Drive 360 Hextile workflows from Codex with bundled skills and a local MCP server.",
+  "skills": "./skills/",
+  "mcpServers": {
+    "hextile": {
+      "command": "python3",
+      "args": ["mcp/hextile_mcp.py"],
+      "cwd": "."
+    }
+  }
+}
