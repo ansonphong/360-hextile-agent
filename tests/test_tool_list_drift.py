@@ -133,6 +133,9 @@ EXPECTED_TOOLS = (
     "preflight_shader_sequence",
     "render_shader_sequence",
     "get_shader_sequence",
+    "control_shader_sequence",
+    "preflight_shader_sequence_export",
+    "export_shader_sequence",
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
@@ -799,7 +802,8 @@ def test_mcp_initialize() -> None:
     assert "tools" in resp["result"]["capabilities"]
     instructions = resp["result"]["instructions"]
     for term in ("current_surface", "executable_capabilities", "execution_ready", "conventions/1", "modulation/2", "keyboard/mouse", "MIDI/OSC/gamepad",
-                 "preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence", "Folder publication is unavailable"):
+                 "preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence",
+                 "preflight_shader_sequence_export", "export_shader_sequence", "control_shader_sequence"):
         assert term in instructions
 
 

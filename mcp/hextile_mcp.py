@@ -123,6 +123,9 @@ TOOL_NAMES = (
     "preflight_shader_sequence",
     "render_shader_sequence",
     "get_shader_sequence",
+    "control_shader_sequence",
+    "preflight_shader_sequence_export",
+    "export_shader_sequence",
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
@@ -171,6 +174,7 @@ _READ_ONLY = frozenset(
         "get_shader_context",
         "preflight_shader_sequence",
         "get_shader_sequence",
+        "preflight_shader_sequence_export",
         "get_shader_update",
         "get_shader_doctor",
     }
@@ -216,6 +220,8 @@ _MUTATING = frozenset(
         "propose_shader",
         "control_shader_timeline",
         "render_shader_sequence",
+        "control_shader_sequence",
+        "export_shader_sequence",
         "open_shader_workspace",
         "register_shader_update",
         "request_shader_doctor",
@@ -464,8 +470,11 @@ _WORKSPACE_GUIDANCE = (
     "get_shader_sequence with the preflight-known deterministic ID and matching request_hash. "
     "Require a confirmed human Apply and saved revision/hash, explicit deferred publication_mode, "
     "exact rational interval/frame count and explicit native output. A lost render reply is recovered "
-    "by GET of that same ID; a missing ID leaves the outcome unknown. Folder publication is unavailable "
-    "through these Shader tools. Generic create_sequence/start_sequence remain folder upres."
+    "by GET of that same ID; a missing ID leaves the outcome unknown. After verified native masters, "
+    "preflight_shader_sequence_export and export_shader_sequence use an explicitly chosen existing local folder, "
+    "PNG or JPG, and the preflight fingerprint. Recover an uncertain export through get_shader_sequence "
+    "and its known attempt_id; never blindly repost. control_shader_sequence stops/resumes native work or "
+    "cancels/retries the exact current export attempt. Generic create_sequence/start_sequence remain folder upres."
 )
 
 
@@ -613,6 +622,29 @@ _SHADER_SEQUENCE_REQUEST = _shader_closed({
     "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
     "output": _SHADER_SEQUENCE_OUTPUT, "publication_mode": {"const": "deferred"},
 }, ("resource_manifest_hash", "selected_resource_frames"))
+_SHADER_SEQUENCE_ID = {"type": "string", "pattern": r"^seq_[0-9a-f]{32}$"}
+_SHADER_ATTEMPT_ID = {"type": "string", "pattern": r"^attempt_[0-9a-f]{32}$"}
+_SHADER_FOLDER_EXPORT = _shader_closed({
+    "sequence_id": _SHADER_SEQUENCE_ID,
+    "destination_folder": {"type": "string", "minLength": 1},
+    "format": {"enum": ["PNG", "JPG"]},
+    "quality_if_jpg": {"type": "integer", "minimum": 1, "maximum": 100},
+}, ("quality_if_jpg",))
+_SHADER_FOLDER_EXPORT["allOf"] = [
+    {"if": {"properties": {"format": {"const": "JPG"}}},
+     "then": {"required": ["quality_if_jpg"]},
+     "else": {"not": {"required": ["quality_if_jpg"]}}},
+]
+_SHADER_SEQUENCE_CONTROL = _shader_closed({
+    "sequence_id": _SHADER_SEQUENCE_ID,
+    "action": {"enum": ["stop", "resume", "cancel_export", "retry_export"]},
+    "attempt_id": _SHADER_ATTEMPT_ID,
+}, ("attempt_id",))
+_SHADER_SEQUENCE_CONTROL["allOf"] = [
+    {"if": {"properties": {"action": {"enum": ["cancel_export", "retry_export"]}}},
+     "then": {"required": ["attempt_id"]},
+     "else": {"not": {"required": ["attempt_id"]}}},
+]
 _SHADER_BASE_PROPERTIES = {"shader": _shader_closed({"origin": {"enum": ["builtin", "user", "project"]}, "shaderId": {"type": "string", "minLength": 1, "pattern": r"^[a-zA-Z0-9_-]+$"}}),
     "project_context_witness": _SHADER_TEXT, "working_revision": {"type": "integer", "minimum": 1},
     "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST,
@@ -1897,6 +1929,26 @@ TOOLS: list[dict[str, Any]] = [
         "For a lost render reply compare request_hash from preflight. A missing ID does not prove the POST failed.",
         {"sequence_id": {"type": "string", "pattern": r"^seq_[0-9a-f]{32}$"}},
         required=["sequence_id"]),
+    {"name": "control_shader_sequence",
+     "description": "Stop or resume the known native Shader sequence; cancel_export or retry_export requires the exact "
+                    "current attempt_id from get_shader_sequence. Resume/retry require operational Standard or Pro. "
+                    "After an uncertain reply, GET the known sequence_id and attempt_id before any new action.",
+     "inputSchema": _SHADER_SEQUENCE_CONTROL,
+     "annotations": _annotations("control_shader_sequence")},
+    {"name": "preflight_shader_sequence_export",
+     "description": "Check verified native masters and an explicitly chosen existing local destination folder. "
+                    "PNG omits quality_if_jpg; JPG requires 1..100. Returns a fingerprint and deterministic attempt_id; "
+                    "the caller must authorize this local destination before use. Private paths stay out of the receipt.",
+     "inputSchema": _SHADER_FOLDER_EXPORT,
+     "annotations": _annotations("preflight_shader_sequence_export")},
+    {"name": "export_shader_sequence",
+     "description": "Publish only the exact preflighted folder intent using its transaction_fingerprint. "
+                    "Retain the preflight-known attempt_id; if POST acknowledgement is uncertain, GET the known "
+                    "sequence_id and compare attempt_id/fingerprint before any further action. Never blindly repost.",
+     "inputSchema": {**_shader_closed({**_SHADER_FOLDER_EXPORT["properties"],
+                                       "transaction_fingerprint": _SHADER_DIGEST}, ("quality_if_jpg",)),
+                     "allOf": _SHADER_FOLDER_EXPORT["allOf"]},
+     "annotations": _annotations("export_shader_sequence")},
     {"name": "open_shader_workspace",
      "description": "Attach native files for a Project or My Library Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,
      "inputSchema": _shader_closed({
@@ -2200,6 +2252,9 @@ class HextileMcpServer:
             "preflight_shader_sequence": self._preflight_shader_sequence,
             "render_shader_sequence": self._render_shader_sequence,
             "get_shader_sequence": self._get_shader_sequence,
+            "control_shader_sequence": self._control_shader_sequence,
+            "preflight_shader_sequence_export": self._preflight_shader_sequence_export,
+            "export_shader_sequence": self._export_shader_sequence,
             "open_shader_workspace": self._open_shader_workspace,
             "register_shader_update": self._register_shader_update,
             "get_shader_update": self._get_shader_update,
@@ -2379,8 +2434,9 @@ class HextileMcpServer:
             )
             return _err_result(safe_error)
         except Exception as exc:  # noqa: BLE001
-            if name in {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence"}:
-                uncertain = name == "render_shader_sequence"
+            if name in {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence",
+                        "control_shader_sequence", "preflight_shader_sequence_export", "export_shader_sequence"}:
+                uncertain = name in {"render_shader_sequence", "control_shader_sequence", "export_shader_sequence"}
                 safe = HextileClientError(
                     "Shader sequence POST outcome unknown. GET the preflight-known sequence_id and compare request_hash; never mint a new ID or blindly repost."
                     if uncertain else "Shader sequence operation unavailable",
@@ -2891,6 +2947,15 @@ class HextileMcpServer:
         if set(args) != {"sequence_id"}:
             raise HextileClientError("Expected exact Shader sequence ID", kind="other", status_code=422)
         return self.client.get_shader_sequence(args["sequence_id"])
+
+    def _control_shader_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.control_shader_sequence(args)
+
+    def _preflight_shader_sequence_export(self, args: dict[str, Any]) -> Any:
+        return self.client.preflight_shader_sequence_export(args)
+
+    def _export_shader_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.export_shader_sequence(args)
 
     def _open_shader_workspace(self, args: dict[str, Any]) -> Any:
         validate_shader_workspace("open", args)

@@ -242,7 +242,7 @@ def test_shader_render_export_mcp_tool_chain() -> None:
     listed = server.handle_rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
     tools = {tool["name"]: tool for tool in listed["result"]["tools"]}
     assert {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence"} <= tools.keys()
-    assert not {"preflight_shader_sequence_export", "export_shader_sequence", "control_shader_sequence"} & tools.keys()
+    assert {"preflight_shader_sequence_export", "export_shader_sequence", "control_shader_sequence"} <= tools.keys()
     body = {"shader_ref": {"origin": "project", "id": "aurora"},
             "project_context_witness": "project-witness", "working_revision": 2,
             "document_hash": "sha256:" + "a" * 64, "source_hash": "sha256:" + "b" * 64,
@@ -262,6 +262,9 @@ def test_shader_render_export_mcp_tool_chain() -> None:
             with pytest.raises(jsonschema.ValidationError):
                 jsonschema.validate(bad, schema)
     assert tools["get_shader_sequence"]["annotations"]["readOnlyHint"] is True
+    assert tools["preflight_shader_sequence_export"]["annotations"]["readOnlyHint"] is True
+    assert tools["export_shader_sequence"]["annotations"]["readOnlyHint"] is False
+    assert tools["control_shader_sequence"]["annotations"]["readOnlyHint"] is False
     with pytest.raises(HextileClientError):
         Client().preflight_shader_sequence({**body, "frame_count": 49})
     dome = {**body, "width": 2048, "height": 2048,
@@ -283,6 +286,31 @@ def test_shader_render_export_mcp_tool_chain() -> None:
     seen: list[Any] = []
     sid = "seq_" + "a" * 32
     digest = "sha256:" + "c" * 64
+    attempt = "attempt_" + "c" * 32
+    folder = {"sequence_id": sid, "destination_folder": "C:\\Chosen\\Frames", "format": "PNG"}
+    jsonschema.validate(folder, tools["preflight_shader_sequence_export"]["inputSchema"])
+    jsonschema.validate({**folder, "transaction_fingerprint": digest},
+                        tools["export_shader_sequence"]["inputSchema"])
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**folder, "format": "JPG"},
+                            tools["preflight_shader_sequence_export"]["inputSchema"])
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**folder, "quality_if_jpg": 90},
+                            tools["preflight_shader_sequence_export"]["inputSchema"])
+    for invalid in ({**folder, "format": "JPG"}, {**folder, "quality_if_jpg": 80},
+                    {**folder, "format": "GIF"}):
+        with pytest.raises(HextileClientError):
+            Client().preflight_shader_sequence_export(invalid)
+    for action in ("stop", "resume", "cancel_export", "retry_export"):
+        args = {"sequence_id": sid, "action": action}
+        if action.endswith("export"):
+            args["attempt_id"] = attempt
+        jsonschema.validate(args, tools["control_shader_sequence"]["inputSchema"])
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"sequence_id": sid, "action": "retry_export"},
+                            tools["control_shader_sequence"]["inputSchema"])
+    with pytest.raises(HextileClientError):
+        Client().control_shader_sequence({"sequence_id": sid, "action": "retry_export"})
     class Response:
         status = 200
         def __init__(self, payload: Any) -> None:
@@ -295,9 +323,19 @@ def test_shader_render_export_mcp_tool_chain() -> None:
             return None
     def opener(req: Any, timeout=None):
         seen.append(req)
+        if req.full_url.endswith("/export/preflight"):
+            return Response({"sequence_id": sid, "attempt_id": attempt,
+                             "transaction_fingerprint": digest, "status": "ready",
+                             "destination_folder": "C:\\private\\frames"})
         if req.full_url.endswith("/preflight"):
             return Response({"sequence_id": sid, "status": "ready", "request_hash": digest,
                              "private_path": "C:\\secret\\frames"})
+        if req.full_url.endswith("/export"):
+            return Response({"sequence_id": sid, "attempt_id": attempt,
+                             "transaction_fingerprint": digest, "status": "queued",
+                             "destination_folder": "C:\\private\\frames"})
+        if req.full_url.endswith(("/stop", "/resume", "/export/cancel", "/export/retry")):
+            return Response({"sequence_id": sid, "status": "queued", "path": "C:\\private"})
         if req.get_method() == "POST":
             return Response({"sequence_id": sid, "status": "queued", "request_hash": digest,
                              "recipe_hash": digest})
@@ -321,10 +359,30 @@ def test_shader_render_export_mcp_tool_chain() -> None:
                                               f"{BASE}/api/shaders/sequences/{sid}"]
     assert all(req.get_header("X-hextile-project-witness") == "project-witness" for req in seen[:2])
     assert all(json.loads(req.data) == body for req in seen[:2])
+    assert transport.preflight_shader_sequence_export(folder) == {
+        "sequence_id": sid, "attempt_id": attempt, "transaction_fingerprint": digest, "status": "ready"}
+    assert transport.export_shader_sequence({**folder, "transaction_fingerprint": digest})["status"] == "queued"
+    assert transport.control_shader_sequence({"sequence_id": sid, "action": "cancel_export",
+                                              "attempt_id": attempt})["attempt_id"] == attempt
+    assert [req.full_url.rsplit("/api", 1)[-1] for req in seen[-3:]] == [
+        f"/shaders/sequences/{sid}/export/preflight", f"/shaders/sequences/{sid}/export",
+        f"/shaders/sequences/{sid}/export/cancel"]
+    assert json.loads(seen[-1].data) == {"attempt_id": attempt}
+    for action, suffix in (("stop", "/stop"), ("resume", "/resume"),
+                           ("retry_export", "/export/retry")):
+        arguments = {"sequence_id": sid, "action": action}
+        if action == "retry_export":
+            arguments["attempt_id"] = attempt
+        assert transport.control_shader_sequence(arguments)["action"] == action
+        assert seen[-1].full_url.endswith(suffix)
     lost = Client(opener=lambda *_a, **_kw: (_ for _ in ()).throw(urllib.error.URLError(TimeoutError())))
     with pytest.raises(HextileClientError) as uncertain:
         lost.render_shader_sequence(body)
     assert uncertain.value.kind == "shader_sequence_outcome_unknown"
+    with pytest.raises(HextileClientError) as uncertain_export:
+        lost.export_shader_sequence({**folder, "transaction_fingerprint": digest})
+    assert uncertain_export.value.kind == "shader_sequence_outcome_unknown"
+    assert "Chosen" not in str(uncertain_export.value)
     missing = Client(opener=_http_error_opener(404, "C:\\private\\formula"))
     with pytest.raises(HextileClientError) as unknown:
         missing.get_shader_sequence(sid)
@@ -418,6 +476,9 @@ def test_shader_render_export_mcp_tool_chain() -> None:
                   "    def preflight_shader_sequence(self, args): return {'sequence_id':'" + sid + "','status':'ready','request_hash':'" + digest + "'}\n"
                   "    def render_shader_sequence(self, args): return {'sequence_id':'" + sid + "','status':'queued','request_hash':'" + digest + "'}\n"
                   "    def get_shader_sequence(self, sid): return {'sequence_id':sid,'status':'completed','frames_completed':48}\n"
+                  "    def control_shader_sequence(self, args): return {'sequence_id':args['sequence_id'],'action':args['action'],'status':'queued'}\n"
+                  "    def preflight_shader_sequence_export(self, args): return {'sequence_id':args['sequence_id'],'attempt_id':'" + attempt + "','transaction_fingerprint':'" + digest + "','status':'ready'}\n"
+                  "    def export_shader_sequence(self, args): return {'sequence_id':args['sequence_id'],'attempt_id':'" + attempt + "','transaction_fingerprint':'" + digest + "','status':'queued'}\n"
                   + script)
         async def exercise_sdk() -> None:
             params = StdioServerParameters(command=sys.executable, args=["-c", script])
@@ -425,9 +486,14 @@ def test_shader_render_export_mcp_tool_chain() -> None:
                 async with ClientSession(reader, writer) as session:
                     await session.initialize()
                     catalog = await session.list_tools()
-                    assert {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence"} <= {tool.name for tool in catalog.tools}
+                    assert {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence",
+                            "control_shader_sequence", "preflight_shader_sequence_export",
+                            "export_shader_sequence"} <= {tool.name for tool in catalog.tools}
                     for name, args in (("preflight_shader_sequence", body), ("render_shader_sequence", body),
-                                       ("get_shader_sequence", {"sequence_id": sid})):
+                                       ("get_shader_sequence", {"sequence_id": sid}),
+                                       ("control_shader_sequence", {"sequence_id": sid, "action": "stop"}),
+                                       ("preflight_shader_sequence_export", folder),
+                                       ("export_shader_sequence", {**folder, "transaction_fingerprint": digest})):
                         result = await session.call_tool(name, args)
                         assert result.isError is False
                         assert json.loads(result.content[0].text)["sequence_id"] == sid

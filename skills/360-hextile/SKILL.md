@@ -125,6 +125,9 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `preflight_shader_sequence` | Check a confirmed saved Shader revision, exact rational interval and explicit native output; returns a deterministic sequence ID before queueing | no |
 | `render_shader_sequence` | Queue that exact saved-native deferred request using its original idempotency key; compare its request hash with preflight | **yes** |
 | `get_shader_sequence` | Read bounded native progress and verified masters by the known Shader sequence ID; private paths and source stay hidden | no |
+| `control_shader_sequence` | Stop/resume native work or cancel/retry the exact current folder attempt; GET after uncertain control replies | **yes** |
+| `preflight_shader_sequence_export` | Check verified masters and an explicitly chosen existing local folder, PNG or JPG; retain the fingerprint and attempt ID | no |
+| `export_shader_sequence` | Publish only that exact preflighted folder intent; GET the known ID/attempt after an uncertain reply | **yes** |
 | `open_shader_workspace` | Acknowledge exact Project Shader attachment; v1 returns two native files, negotiated v2 returns the declared source set and metadata path. Follow installed `360-hextile` | **yes** |
 | `register_shader_update` | Register the acknowledged format-specific raw digest: v1 pair or complete v2 declared set, including unused helpers; automatic APP Prepare/compile checks, never Apply | **yes** |
 | `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
@@ -133,7 +136,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 
 ### Selection guide
 
-For saved Shader animation, inspect typed targets with `get_shader_context`, propose the expression and timeline, then wait for human Apply and a confirmed Save receipt. Reread the saved revision and hashes before `preflight_shader_sequence` → `render_shader_sequence` → `get_shader_sequence`. Use exact rational endpoints, frame rate/count, explicit equirectangular or square Dome output and `publication_mode:"deferred"`. On an uncertain render reply, GET the preflight-known ID and compare `request_hash`; unknown 404 is still an unknown outcome. These tools produce native masters only. Folder publication and sequence control are not offered by this Shader MCP catalog. Generic `create_sequence`/`start_sequence` remain folder upres. See the runnable JSON in `get_guide(name="recipes")`.
+For saved Shader animation, inspect typed targets with `get_shader_context`, propose the expression and timeline, then wait for human Apply and a confirmed Save receipt. Reread the saved revision and hashes before `preflight_shader_sequence` → `render_shader_sequence` → `get_shader_sequence`. Use exact rational endpoints, frame rate/count, explicit equirectangular or square Dome output and `publication_mode:"deferred"`. On an uncertain render reply, GET the preflight-known ID and compare `request_hash`; unknown 404 is still an unknown outcome. Once native masters are complete, obtain explicit local folder consent, then call `preflight_shader_sequence_export` → `export_shader_sequence` with the same intent and fingerprint. GET the known sequence and attempt after uncertain export or control replies; never blindly repost. `control_shader_sequence` needs the current `attempt_id` for cancel/retry. Generic `create_sequence`/`start_sequence` remain folder upres. See runnable JSON in `get_guide(name="recipes")`.
 
 1. **Handshake** → `get_capabilities` then `get_live_context` before compose.
 2. **Learn** → `get_guide` (`best-practices` then `workflow-schema`).

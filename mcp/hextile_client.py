@@ -1017,6 +1017,124 @@ class Client:
                                               if isinstance(item, Mapping)]
         return result
 
+    @staticmethod
+    def _shader_export_args(args: Mapping[str, Any], *, submit: bool) -> tuple[str, dict[str, Any]]:
+        required = {"sequence_id", "destination_folder", "format"}
+        optional = {"quality_if_jpg"}
+        if submit:
+            required.add("transaction_fingerprint")
+        if (not isinstance(args, Mapping) or not required <= args.keys()
+                or args.keys() - required - optional):
+            raise HextileClientError("Expected closed Shader folder export intent", kind="other", status_code=422)
+        sid = args["sequence_id"]
+        folder = args["destination_folder"]
+        encoding = args["format"]
+        quality = args.get("quality_if_jpg")
+        if (type(sid) is not str or re.fullmatch(r"seq_[0-9a-f]{32}", sid) is None
+                or type(folder) is not str or not folder or "\x00" in folder
+                or type(encoding) is not str or encoding not in ("PNG", "JPG")
+                or (encoding == "JPG") != (type(quality) is int and 1 <= quality <= 100)
+                or (encoding == "PNG" and "quality_if_jpg" in args)):
+            raise HextileClientError("Invalid Shader folder export intent", kind="other", status_code=422)
+        body = {"destination_folder": folder, "format": encoding,
+                "quality_if_jpg": quality}
+        if submit:
+            fingerprint = args["transaction_fingerprint"]
+            if type(fingerprint) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", fingerprint) is None:
+                raise HextileClientError("Invalid Shader export fingerprint", kind="other", status_code=422)
+            body["transaction_fingerprint"] = fingerprint
+        return sid, body
+
+    @staticmethod
+    def _shader_export_receipt(data: Any, sequence_id: str) -> dict[str, Any]:
+        if not isinstance(data, Mapping) or data.get("sequence_id") != sequence_id:
+            raise HextileClientError("Invalid Shader export receipt", kind="other")
+        result = {"sequence_id": sequence_id}
+        patterns = {"attempt_id": r"attempt_[0-9a-f]{32}",
+                    "transaction_fingerprint": r"sha256:[0-9a-f]{64}",
+                    "recipe_hash": r"sha256:[0-9a-f]{64}"}
+        for key, pattern in patterns.items():
+            if type(data.get(key)) is str and re.fullmatch(pattern, data[key]):
+                result[key] = data[key]
+        if ("attempt_id" not in result or "transaction_fingerprint" not in result
+                or result["attempt_id"] != "attempt_" + result["transaction_fingerprint"][7:39]):
+            raise HextileClientError("Invalid Shader export receipt", kind="other")
+        if data.get("status") in {"ready", "existing", "queued", "running", "completed", "failed", "cancelled", "interrupted"}:
+            result["status"] = data["status"]
+        if type(data.get("attempt_revision")) is int and data["attempt_revision"] >= 0:
+            result["attempt_revision"] = data["attempt_revision"]
+        return result
+
+    def preflight_shader_sequence_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        sid, body = self._shader_export_args(args, submit=False)
+        try:
+            data = self.post_json(f"/api/shaders/sequences/{sid}/export/preflight", body)
+            return self._shader_export_receipt(data, sid)
+        except HextileClientError as exc:
+            raise self._shader_sequence_error(exc) from exc
+        except Exception as exc:
+            raise HextileClientError("Shader export preflight unavailable", kind="other") from exc
+
+    def export_shader_sequence(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        sid, body = self._shader_export_args(args, submit=True)
+        try:
+            data = self.post_json(f"/api/shaders/sequences/{sid}/export", body)
+            receipt = self._shader_export_receipt(data, sid)
+            if receipt["transaction_fingerprint"] != body["transaction_fingerprint"]:
+                raise HextileClientError("Invalid Shader export acknowledgement", kind="other", status_code=202)
+            return receipt
+        except HextileClientError as exc:
+            if (exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500
+                    or exc.kind == "other" and exc.status_code is not None and 200 <= exc.status_code < 300):
+                raise HextileClientError(
+                    "Shader export POST outcome unknown. GET the preflight-known sequence_id and compare "
+                    "attempt_id and transaction_fingerprint; never blindly repost.",
+                    status_code=exc.status_code, kind="shader_sequence_outcome_unknown",
+                    receipt={"status": "unknown"}) from exc
+            raise self._shader_sequence_error(exc) from exc
+        except Exception as exc:
+            raise HextileClientError(
+                "Shader export POST outcome unknown. GET the preflight-known sequence_id and compare "
+                "attempt_id and transaction_fingerprint; never blindly repost.",
+                kind="shader_sequence_outcome_unknown", receipt={"status": "unknown"}) from exc
+
+    def control_shader_sequence(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        if (not isinstance(args, Mapping) or not {"sequence_id", "action"} <= args.keys()
+                or args.keys() - {"sequence_id", "action", "attempt_id"}):
+            raise HextileClientError("Expected closed Shader sequence control", kind="other", status_code=422)
+        sid, action = args["sequence_id"], args["action"]
+        attempt = args.get("attempt_id")
+        if (type(sid) is not str or re.fullmatch(r"seq_[0-9a-f]{32}", sid) is None
+                or type(action) is not str or action not in {"stop", "resume", "cancel_export", "retry_export"}
+                or (action in {"cancel_export", "retry_export"}) != (type(attempt) is str and re.fullmatch(r"attempt_[0-9a-f]{32}", attempt) is not None)
+                or (action in {"stop", "resume"} and "attempt_id" in args)):
+            raise HextileClientError("Invalid Shader sequence control target", kind="other", status_code=422)
+        suffix = {"stop": "stop", "resume": "resume", "cancel_export": "export/cancel",
+                  "retry_export": "export/retry"}[action]
+        try:
+            data = self.post_json(f"/api/shaders/sequences/{sid}/{suffix}",
+                                  {"attempt_id": attempt} if attempt is not None else None)
+            if not isinstance(data, Mapping) or data.get("sequence_id") != sid:
+                raise HextileClientError("Invalid Shader sequence control acknowledgement", kind="other", status_code=202)
+            result = {"sequence_id": sid, "action": action}
+            if data.get("status") in {"queued", "processing", "completed", "completed_with_errors", "failed",
+                                      "cancelled", "paused", "incomplete", "stopped", "running", "interrupted"}:
+                result["status"] = data["status"]
+            if attempt is not None:
+                result["attempt_id"] = attempt
+            return result
+        except HextileClientError as exc:
+            if exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500:
+                raise HextileClientError(
+                    "Shader control POST outcome unknown. GET the known sequence_id and exact attempt_id before another action.",
+                    status_code=exc.status_code, kind="shader_sequence_outcome_unknown",
+                    receipt={"status": "unknown"}) from exc
+            raise self._shader_sequence_error(exc) from exc
+        except Exception as exc:
+            raise HextileClientError(
+                "Shader control POST outcome unknown. GET the known sequence_id and exact attempt_id before another action.",
+                kind="shader_sequence_outcome_unknown", receipt={"status": "unknown"}) from exc
+
     def control_shader_timeline(self, args: Mapping[str, Any]) -> Any:
         """Submit once or recover the caller's known request ID; never poll the UI delivery door."""
         request_id = args.get("client_request_id") if isinstance(args, Mapping) else None
