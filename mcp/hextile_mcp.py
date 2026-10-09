@@ -2379,6 +2379,20 @@ class HextileMcpServer:
             )
             return _err_result(safe_error)
         except Exception as exc:  # noqa: BLE001
+            if name in {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence"}:
+                uncertain = name == "render_shader_sequence"
+                safe = HextileClientError(
+                    "Shader sequence POST outcome unknown. GET the preflight-known sequence_id and compare request_hash; never mint a new ID or blindly repost."
+                    if uncertain else "Shader sequence operation unavailable",
+                    kind="shader_sequence_outcome_unknown" if uncertain else "other",
+                    receipt={"status": "unknown"} if uncertain else None,
+                )
+                self._emit_activity(
+                    tool=name, call_id=call_id, phase="failed",
+                    error={"kind": safe.kind, "status_code": None, "message": str(safe)},
+                    overrides_keys=overrides_keys,
+                )
+                return _err_result(error_payload(safe))
             if name in _LAYER_TOOLS:
                 self._emit_activity(
                     tool=name, call_id=call_id, phase="failed",

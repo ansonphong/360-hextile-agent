@@ -897,6 +897,7 @@ class Client:
         except (ValueError, AttributeError, TypeError):
             pass
         if uncertain and (exc.kind == "app_down" or exc.status_code is None
+                          or exc.status_code >= 500
                           or exc.kind == "other" and exc.status_code is not None and 200 <= exc.status_code < 300):
             return HextileClientError(
                 "Shader sequence POST outcome unknown. GET the preflight-known sequence_id and compare request_hash; never mint a new ID or blindly repost.",
@@ -930,6 +931,9 @@ class Client:
             return self._shader_sequence_receipt(data, preflight=preflight)
         except HextileClientError as exc:
             raise self._shader_sequence_error(exc, uncertain=not preflight) from exc
+        except Exception as exc:  # Transport/read failures can include private exception text.
+            safe = HextileClientError("Shader sequence transport failed", kind="other")
+            raise self._shader_sequence_error(safe, uncertain=not preflight) from exc
 
     def preflight_shader_sequence(self, body: Mapping[str, Any]) -> dict[str, Any]:
         return self._shader_sequence_post(body, preflight=True)
@@ -949,6 +953,8 @@ class Client:
                     status_code=404, kind="shader_sequence_outcome_unknown",
                     receipt={"sequence_id": sequence_id, "status": "unknown"}) from exc
             raise self._shader_sequence_error(exc) from exc
+        except Exception as exc:  # Keep unexpected transport details out of MCP results.
+            raise HextileClientError("Shader sequence status unavailable", kind="other") from exc
         if not isinstance(data, Mapping) or data.get("sequence_id") != sequence_id:
             raise HextileClientError("Invalid Shader sequence status", kind="other")
         result: dict[str, Any] = {"sequence_id": sequence_id}

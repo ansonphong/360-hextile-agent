@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import asyncio
+import http.client
 import importlib.util
 import json
 import jsonschema
@@ -336,6 +337,75 @@ def test_shader_render_export_mcp_tool_chain() -> None:
         Client(opener=stale_opener).preflight_shader_sequence(body)
     assert stale.value.receipt == {"code": "stale_document_hash"}
     assert "private" not in str(stale.value) and "private" not in json.dumps(stale.value.receipt)
+    with pytest.raises(HextileClientError) as refused:
+        Client(opener=stale_opener).render_shader_sequence(body)
+    assert refused.value.kind == "http" and refused.value.status_code == 422
+    assert refused.value.receipt == {"code": "stale_document_hash"}
+
+    # A lost or malformed response must not expose transport text or replay a render.
+    private = "C:\\private\\shader-formula"
+    for name, args in (("preflight_shader_sequence", body),
+                       ("render_shader_sequence", body),
+                       ("get_shader_sequence", {"sequence_id": sid})):
+        for failure in (http.client.BadStatusLine(private), RuntimeError(private)):
+            calls: list[Any] = []
+            def broken(req: Any, timeout=None):
+                if "/api/shaders/sequences" in req.full_url:
+                    calls.append(req)
+                raise failure
+            result = HextileMcpServer(client=Client(opener=broken)).call_tool(name, args)
+            payload = json.loads(result["content"][0]["text"])
+            assert result["isError"] is True
+            assert "shader-formula" not in json.dumps(result) and "trace" not in payload
+            assert len(calls) == 1
+            assert payload["kind"] == ("shader_sequence_outcome_unknown" if name == "render_shader_sequence" else "other")
+
+    class Interrupted(Response):
+        def read(self) -> bytes:
+            raise http.client.IncompleteRead(private.encode())
+    for name, args in (("preflight_shader_sequence", body),
+                       ("render_shader_sequence", body),
+                       ("get_shader_sequence", {"sequence_id": sid})):
+        result = HextileMcpServer(client=Client(opener=lambda *_a, **_k: Interrupted({}))).call_tool(name, args)
+        payload = json.loads(result["content"][0]["text"])
+        assert "shader-formula" not in json.dumps(result) and "trace" not in payload
+        assert payload["kind"] == ("shader_sequence_outcome_unknown" if name == "render_shader_sequence" else "other")
+
+    class UnexpectedClient:
+        def preflight_shader_sequence(self, _args: Any) -> Any:
+            raise RuntimeError(private)
+        render_shader_sequence = preflight_shader_sequence
+        get_shader_sequence = preflight_shader_sequence
+    for name, args in (("preflight_shader_sequence", body),
+                       ("render_shader_sequence", body),
+                       ("get_shader_sequence", {"sequence_id": sid})):
+        result = HextileMcpServer(client=UnexpectedClient()).call_tool(name, args)
+        payload = json.loads(result["content"][0]["text"])
+        assert "shader-formula" not in json.dumps(result) and "trace" not in payload
+        assert payload["kind"] == ("shader_sequence_outcome_unknown" if name == "render_shader_sequence" else "other")
+
+    for status in (500, 503):
+        calls: list[Any] = []
+        def admitted_then_error(req: Any, timeout=None):
+            if "/api/shaders/sequences" in req.full_url:
+                calls.append(req)
+            if req.get_method() == "POST":
+                raise urllib.error.HTTPError(req.full_url, status, private, {}, io.BytesIO(private.encode()))
+            return Response({"sequence_id": sid, "status": "queued", "request_hash": digest})
+        recovery_server = HextileMcpServer(client=Client(opener=admitted_then_error))
+        result = recovery_server.call_tool("render_shader_sequence", body)
+        payload = json.loads(result["content"][0]["text"])
+        assert result["isError"] is True and payload["kind"] == "shader_sequence_outcome_unknown"
+        assert payload["receipt"] == {"status": "unknown"}
+        assert "GET" in payload["error"] and "request_hash" in payload["error"]
+        assert "shader-formula" not in json.dumps(result) and "trace" not in payload
+        assert [req.get_method() for req in calls] == ["POST"]
+        recovered = recovery_server.call_tool("get_shader_sequence", {"sequence_id": sid})
+        assert json.loads(recovered["content"][0]["text"])["request_hash"] == digest
+        assert [req.get_method() for req in calls] == ["POST", "GET"]
+        preflight = recovery_server.call_tool("preflight_shader_sequence", body)
+        preflight_error = json.loads(preflight["content"][0]["text"])
+        assert preflight_error["kind"] == "http" and preflight_error["status_code"] == status
 
     if importlib.util.find_spec("mcp") is not None:
         from mcp import ClientSession, StdioServerParameters
