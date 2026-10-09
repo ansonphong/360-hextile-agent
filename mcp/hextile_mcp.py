@@ -119,6 +119,7 @@ TOOL_NAMES = (
     "get_spot_clone",
     "get_shader_context",
     "propose_shader",
+    "control_shader_timeline",
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
@@ -208,6 +209,7 @@ _MUTATING = frozenset(
         "commit_layer_draft",
         "clone_spot",
         "propose_shader",
+        "control_shader_timeline",
         "open_shader_workspace",
         "register_shader_update",
         "request_shader_doctor",
@@ -256,6 +258,7 @@ _CONTROL_TOOLS = frozenset(
         "cancel_model_download",
         "get_layer_generation",
         "cancel_layer_generation",
+        "control_shader_timeline",
     }
 )
 _LAYER_TOOLS = frozenset({
@@ -436,6 +439,10 @@ _WORKSPACE_GUIDANCE = (
     "For Playable Shaders, read recipes and best-practices plus acknowledged closed conventions/1 instructions. "
     "Pass through APP ABI/conventions instructions, available and executable_capabilities; observe execution_ready "
     "independently of the current document declaration. Check conventions/1 and modulation/2 separately. "
+    "For schema-2 expression edits check parameter-expressions/1, shader-timeline/1 and admitted modulation/3 separately. "
+    "Discover control_shader_timeline through tools/list; current_surface owner generations are opaque witness, "
+    "and known client_request_id status recovers uncertain control replies without a new action. "
+    "Session playback does not save: propose_shader set_timeline edits document start/end/loop for human Apply. "
     "Author Enter -> default-0 logical gate -> schema-2 oneshot BLAST (20 ms Linear Attack, "
     "400 ms Ease Out Release, exponent 2) -> Range -> declared Glow parameter and GLSL effect "
     "as one complete two-file candidate, with the default Master Clock and sorted sidecar declarations. "
@@ -517,9 +524,30 @@ _SHADER_EDIT_PAYLOADS = {
     "set_binding_enabled": {"binding": _SHADER_BINDING_REF, "enabled": _SHADER_BOOL},
     "set_mouse_input": {"value": _SHADER_MOUSE}, "set_master_clock": {"value": _SHADER_CLOCK},
 }
-_SHADER_EDITS = _shader_closed({"schema": {"const": 1}, "edits": {"type": "array", "maxItems": 32,
-    "items": {"oneOf": [_shader_closed({"op": {"const": name}, **fields},
-        ("ref",) if name in ("add_source", "add_binding") else ()) for name, fields in _SHADER_EDIT_PAYLOADS.items()]}}})
+_SHADER_SCALAR_REFS = {"type": "object", "maxProperties": 64,
+    "propertyNames": {"pattern": r"^[A-Za-z][A-Za-z0-9_]{0,63}$"},
+    "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 256}}
+_SHADER_RATIONAL = _shader_closed({
+    "num": {"type": "string", "pattern": r"^(0|[1-9][0-9]*)$"},
+    "den": {"type": "string", "pattern": r"^[1-9][0-9]*$"}})
+_SHADER_EDIT_PAYLOADS_V2 = {
+    **_SHADER_EDIT_PAYLOADS,
+    "set_parameter_expression": {"target": _SHADER_TEXT, "source_text": {"type": "string", "minLength": 1, "maxLength": 512}, "refs": _SHADER_SCALAR_REFS},
+    "remove_parameter_expression": {"target": _SHADER_TEXT},
+    "set_parameter_mode": {"target": _SHADER_TEXT, "mode": {"enum": ["fixed", "expression", "modulator"]},
+                           "binding": {"oneOf": [_shader_closed({"id": _SHADER_BINDING_ID}), _shader_binding(adding=True)]}},
+    "set_timeline": {"start": _SHADER_RATIONAL, "end": _SHADER_RATIONAL, "loop": _SHADER_BOOL},
+}
+def _shader_edit_batch(schema: int, payloads: dict[str, Any]) -> dict[str, Any]:
+    items = []
+    for name, fields in payloads.items():
+        optional = ("ref",) if name in ("add_source", "add_binding") else (("binding",) if name == "set_parameter_mode" else ())
+        items.append(_shader_closed({"op": {"const": name}, **fields}, optional))
+    return _shader_closed({"schema": {"const": schema}, "edits": {"type": "array", "maxItems": 32,
+        "items": {"oneOf": items}}})
+
+_SHADER_EDITS = {"oneOf": [_shader_edit_batch(1, _SHADER_EDIT_PAYLOADS),
+                           _shader_edit_batch(2, _SHADER_EDIT_PAYLOADS_V2)]}
 _SHADER_DIGEST = {"type": "string", "pattern": r"^sha256:[0-9a-f]{64}$"}
 _SHADER_BASE_PROPERTIES = {"shader": _shader_closed({"origin": {"enum": ["builtin", "user", "project"]}, "shaderId": {"type": "string", "minLength": 1, "pattern": r"^[a-zA-Z0-9_-]+$"}}),
     "project_context_witness": _SHADER_TEXT, "working_revision": {"type": "integer", "minimum": 1},
@@ -1731,8 +1759,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "get_shader_context",
-        "Read the open Shader, including bounded source-free Playable Shaders conventions/1 and modulation/2 metadata "
-        "with channel aliases and camera helper signatures. GLSL and resolved authoring bytes require include_source "
+        "Read the open Shader, including bounded source-free conventions/1, modulation/2 or /3, "
+        "parameter-expressions/1, shader-timeline/1, stable typed parameter addresses, aliases and camera helpers. "
+        "GLSL and resolved authoring bytes require include_source "
         "and its separate source grant; include_formula only grants hx-math formulas. "
         "Does not Import, delete, Accept a Board, prepare, or consume. "
         "Never returns an absolute path or pixels.",
@@ -1748,13 +1777,43 @@ TOOLS: list[dict[str, Any]] = [
         required=["origin", "shader_id", "project_context_witness"],
     ),
     {"name": "propose_shader",
-     "description": "POST one closed Shader proposal, including typed modulation_edits, and return ticket identity. "
+     "description": "POST one closed Shader proposal, including schema-2 parameter expression, mode and saved timeline edits, and return ticket identity. "
                     "APP alone checks grants and materializes IDs. Legacy proposals and every Board row must preserve Playable "
                     "conventions, envelope definitions/input refs/settings, envelope-sourced mappings and their capability declarations. "
                     "To first create or revise Playable controls, use the attested source.glsl/authoring.json workspace "
                     "and installed shader skill. Does not Import, Accept, Apply, Run, arm Interact, press keys, "
                     "set live pose or write Project presets.",
      "inputSchema": _SHADER_PROPOSAL_SCHEMA, "annotations": _annotations("propose_shader")},
+    _tool_def("control_shader_timeline",
+        "Control only the currently mounted Shader Workshop session after fresh get_live_context discovery. "
+        "Submit play, pause, seek (seconds), or reset with a caller-known client_request_id and the exact "
+        "current_surface witness including opaque owner generations. Follow and the live lease are required. "
+        "If the reply is uncertain, call this same tool with operation=status and that ID; unknown or 404 "
+        "is not proof of refusal. Never mint a fresh ID or blindly replay the action. "
+        "This changes session playback, not the saved timeline or Shader document.",
+        {"operation": {"enum": ["submit", "status"]},
+         "client_request_id": {"type": "string", "minLength": 1, "maxLength": 64,
+                               "pattern": r"^[A-Za-z0-9_-]+$"},
+         "action": {"enum": ["play", "pause", "seek", "reset"]},
+         "time_seconds": {"type": "number", "minimum": 0, "maximum": 86400},
+         "witness": _shader_closed({
+             "studio_surface_id": {"type": "string", "minLength": 1, "maxLength": 64,
+                                   "pattern": r"^[A-Za-z0-9_-]+$"},
+             "project_context_witness": _WORKSPACE_WITNESS,
+             "shader": _SHADER_BASE_PROPERTIES["shader"],
+             "base": {"oneOf": [
+                 _shader_closed({"working_revision": {"type": "integer", "minimum": 1},
+                                 "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST,
+                                 "manifest_hash": {"oneOf": [_SHADER_DIGEST, {"type": "null"}]},
+                                }, ("manifest_hash",)),
+                 _shader_closed({"kind": {"const": "saved"}, "working_revision": {"type": "integer", "minimum": 1},
+                                 "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST}),
+                 _shader_closed({"kind": {"const": "unaccepted"}, "authoring_digest": _SHADER_DIGEST})]},
+             "owner_id": {"type": "string", "minLength": 1, "maxLength": 128},
+             "owner_generation": {"type": "integer", "minimum": 0},
+             "viewer_generation": {"type": "integer", "minimum": 0},
+             "source_epoch": {"type": "integer", "minimum": 0}})},
+        required=["operation", "client_request_id"]),
     {"name": "open_shader_workspace",
      "description": "Attach native files for a Project or My Library Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,
      "inputSchema": _shader_closed({
@@ -1813,6 +1872,16 @@ TOOLS: list[dict[str, Any]] = [
         required=["request_id", "project_context_witness"]),
 ]
 
+_timeline_tool = next(t for t in TOOLS if t["name"] == "control_shader_timeline")
+_timeline_tool["inputSchema"]["oneOf"] = [
+    {"properties": {"operation": {"const": "status"}},
+     "not": {"anyOf": [{"required": [key]} for key in ("action", "time_seconds", "witness")]}},
+    {"properties": {"operation": {"const": "submit"}, "action": {"const": "seek"}},
+     "required": ["action", "witness", "time_seconds"]},
+    {"properties": {"operation": {"const": "submit"},
+                    "action": {"enum": ["play", "pause", "reset"]}},
+     "required": ["action", "witness"], "not": {"required": ["time_seconds"]}},
+]
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
 assert _BATCH_TOOLS <= set(TOOL_NAMES)
@@ -2044,6 +2113,7 @@ class HextileMcpServer:
             "get_spot_clone": self._get_spot_clone,
             "get_shader_context": self._get_shader_context,
             "propose_shader": self._propose_shader,
+            "control_shader_timeline": self._control_shader_timeline,
             "open_shader_workspace": self._open_shader_workspace,
             "register_shader_update": self._register_shader_update,
             "get_shader_update": self._get_shader_update,
@@ -2707,6 +2777,9 @@ class HextileMcpServer:
                 raise HextileClientError("Shader proposal cannot import, delete, or consume", kind="other")
         validate_shader_proposal(args)
         return self._shader_ticket_identity(self.client.propose_shader(args))
+
+    def _control_shader_timeline(self, args: dict[str, Any]) -> Any:
+        return self.client.control_shader_timeline(args)
 
     def _open_shader_workspace(self, args: dict[str, Any]) -> Any:
         validate_shader_workspace("open", args)

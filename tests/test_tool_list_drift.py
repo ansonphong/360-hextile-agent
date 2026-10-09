@@ -129,6 +129,7 @@ EXPECTED_TOOLS = (
     "get_spot_clone",
     "get_shader_context",
     "propose_shader",
+    "control_shader_timeline",
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",

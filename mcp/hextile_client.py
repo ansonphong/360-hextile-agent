@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import os
 import re
 import socket
@@ -178,6 +179,13 @@ _SHADER_EDIT_FIELDS = {
     "set_binding_enabled": ({"binding", "enabled"}, set()), "set_mouse_input": ({"value"}, set()),
     "set_master_clock": ({"value"}, set()),
 }
+_SHADER_EDIT_FIELDS_V2 = {
+    **_SHADER_EDIT_FIELDS,
+    "set_parameter_expression": ({"target", "source_text", "refs"}, set()),
+    "remove_parameter_expression": ({"target"}, set()),
+    "set_parameter_mode": ({"target", "mode"}, {"binding"}),
+    "set_timeline": ({"start", "end", "loop"}, set()),
+}
 
 
 def validate_shader_proposal(body: Mapping[str, Any]) -> None:
@@ -198,7 +206,7 @@ def validate_shader_proposal(body: Mapping[str, Any]) -> None:
         if field == "modulation_edits":
             batch = body[field]
             if (set(batch) != {"schema", "edits"} or type(batch["schema"]) is not int
-                    or batch["schema"] != 1 or type(batch["edits"]) is not list or len(batch["edits"]) > 32):
+                    or batch["schema"] not in (1, 2) or type(batch["edits"]) is not list or len(batch["edits"]) > 32):
                 refuse()
             try:
                 size = len(json.dumps(batch, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8"))
@@ -207,9 +215,10 @@ def validate_shader_proposal(body: Mapping[str, Any]) -> None:
             if size > 65536:
                 refuse()
             for edit in batch["edits"]:
-                if type(edit) is not dict or type(edit.get("op")) is not str or edit["op"] not in _SHADER_EDIT_FIELDS:
+                fields = _SHADER_EDIT_FIELDS if batch["schema"] == 1 else _SHADER_EDIT_FIELDS_V2
+                if type(edit) is not dict or type(edit.get("op")) is not str or edit["op"] not in fields:
                     refuse()
-                required, optional = _SHADER_EDIT_FIELDS[edit["op"]]
+                required, optional = fields[edit["op"]]
                 if not (required | {"op"}) <= edit.keys() or edit.keys() - required - optional - {"op"}:
                     refuse()
     elif kind == "shader_variation_board":
@@ -781,6 +790,70 @@ class Client:
             dict(body),
             headers={"X-Hextile-Agent": "mcp"},
         )
+
+    def control_shader_timeline(self, args: Mapping[str, Any]) -> Any:
+        """Submit once or recover the caller's known request ID; never poll the UI delivery door."""
+        request_id = args.get("client_request_id") if isinstance(args, Mapping) else None
+        if type(request_id) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request_id) is None:
+            raise HextileClientError("Invalid Shader timeline client_request_id", kind="other", status_code=422)
+        operation = args.get("operation")
+        if operation == "status":
+            if set(args) != {"operation", "client_request_id"}:
+                raise HextileClientError("Expected exact timeline status arguments", kind="other", status_code=422)
+            try:
+                return self.get_json(f"/api/agent/shader-timeline-control/requests/{request_id}",
+                                     headers={"X-Hextile-Agent": "mcp"})
+            except HextileClientError as exc:
+                if exc.status_code == 404:
+                    raise HextileClientError(
+                        f"Shader timeline outcome unknown for client_request_id={request_id}; expiry or absence is not refusal.",
+                        kind="shader_timeline_outcome_unknown", status_code=404,
+                        receipt={"client_request_id": request_id, "status": "unknown"}) from exc
+                raise
+        if operation != "submit" or not {"operation", "client_request_id", "action", "witness"} <= set(args):
+            raise HextileClientError("Expected exact timeline submit arguments", kind="other", status_code=422)
+        action = args["action"]
+        expected = {"operation", "client_request_id", "action", "witness"} | ({"time_seconds"} if action == "seek" else set())
+        if set(args) != expected or action not in {"play", "pause", "seek", "reset"}:
+            raise HextileClientError("Invalid Shader timeline action", kind="other", status_code=422)
+        if action == "seek" and (type(args["time_seconds"]) not in (int, float)
+                                 or not math.isfinite(args["time_seconds"])
+                                 or not 0 <= args["time_seconds"] <= 86400):
+            raise HextileClientError("Invalid Shader timeline seek time", kind="other", status_code=422)
+        witness = args["witness"]
+        witness_keys = {"studio_surface_id", "project_context_witness", "shader", "base",
+                        "owner_id", "owner_generation", "viewer_generation", "source_epoch"}
+        if (type(witness) is not dict or set(witness) != witness_keys
+                or any(type(witness[key]) is not str or not witness[key]
+                       for key in ("studio_surface_id", "project_context_witness", "owner_id"))
+                or any(type(witness[key]) is not int or witness[key] < 0
+                       for key in ("owner_generation", "viewer_generation", "source_epoch"))
+                or type(witness["shader"]) is not dict or set(witness["shader"]) != {"origin", "shaderId"}
+                or witness["shader"]["origin"] not in {"builtin", "user", "project"}
+                or type(witness["shader"]["shaderId"]) is not str
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", witness["shader"]["shaderId"]) is None
+                or type(witness["base"]) is not dict):
+            raise HextileClientError("Invalid Shader timeline witness", kind="other", status_code=422)
+        body = {key: value for key, value in args.items() if key != "operation"}
+        try:
+            receipt = self.post_json("/api/agent/shader-timeline-control", body,
+                                     headers={"X-Hextile-Agent": "mcp"})
+        except http.client.HTTPException as exc:
+            raise HextileClientError(
+                f"Shader timeline outcome unknown for client_request_id={request_id}; use status with this ID.",
+                kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id}) from exc
+        except HextileClientError as exc:
+            if exc.kind == "app_down" or (exc.kind == "other" and exc.status_code is not None
+                                          and 200 <= exc.status_code < 300):
+                raise HextileClientError(
+                    f"Shader timeline outcome unknown for client_request_id={request_id}; use status with this ID.",
+                    kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id}) from exc
+            raise
+        if not isinstance(receipt, dict) or receipt.get("status") not in {"pending", "applied", "refused", "unknown"}:
+            raise HextileClientError(
+                f"Shader timeline acknowledgement unknown for client_request_id={request_id}; use status with this ID.",
+                kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id})
+        return receipt
 
     def request_shader_doctor(self, args: Mapping[str, Any]) -> Any:
         """Submit once; an uncertain outcome is reconciled only by exact-ID GET."""

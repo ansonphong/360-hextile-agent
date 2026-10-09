@@ -6,8 +6,10 @@ import json
 import ast
 import http.client
 import hashlib
+import importlib.util
 import io
 import re
+import asyncio
 import urllib.error
 from copy import deepcopy
 
@@ -28,6 +30,114 @@ from hextile_mcp import TOOLS, HextileMcpServer  # noqa: E402
 
 def _schema(name: str) -> dict[str, Any]:
     return next(tool for tool in TOOLS if tool["name"] == name)
+
+
+def test_expression_timeline_mcp_schema_and_teaching() -> None:
+    proposal = _proposal()
+    proposal["modulation_edits"] = {"schema": 2, "edits": [
+        {"op": "set_parameter_expression", "target": "shader.params.gain",
+         "source_text": "T*2", "refs": {}},
+        {"op": "set_timeline", "start": {"num": "0", "den": "1"},
+         "end": {"num": "4", "den": "1"}, "loop": True}]}
+    jsonschema.validate(proposal, _schema("propose_shader")["inputSchema"])
+    with mock.patch.object(Client, "post_json", return_value={"ticket_id": "spt_1"}) as post:
+        assert Client().propose_shader(proposal) == {"ticket_id": "spt_1"}
+    assert post.call_args.args == ("/api/agent/shader-proposals", proposal)
+    witness = {"studio_surface_id": "surface", "project_context_witness": "wit",
+               "shader": {"origin": "user", "shaderId": "aurora"},
+               "base": {"kind": "saved", "working_revision": 1,
+                        "document_hash": "sha256:" + "ab" * 32,
+                        "source_hash": "sha256:" + "cd" * 32},
+               "owner_id": "owner", "owner_generation": 1,
+               "viewer_generation": 2, "source_epoch": 3}
+    control = _schema("control_shader_timeline")
+    assert control["annotations"]["readOnlyHint"] is False
+    submit = {"operation": "submit", "client_request_id": "known_1",
+              "action": "seek", "time_seconds": 2.5, "witness": witness}
+    status = {"operation": "status", "client_request_id": "known_1"}
+    for args in (submit, status):
+        jsonschema.validate(args, control["inputSchema"])
+    for malformed in ({**submit, "action": "pause"},
+                      {**status, "witness": witness},
+                      {**submit, "witness": {**witness, "owner_generation": None}}):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(malformed, control["inputSchema"])
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**submit, "time_seconds": float("inf")}, control["inputSchema"])
+    seen = []
+    client = mock.Mock()
+    client.control_shader_timeline.side_effect = lambda args: seen.append(args) or {"status": "pending"}
+    server = HextileMcpServer(client=client)
+    assert server._control_shader_timeline(submit) == {"status": "pending"}
+    assert server._control_shader_timeline(status) == {"status": "pending"}
+    assert seen == [submit, status]
+    from hextile_mcp import load_guide
+    guide = load_guide("recipes")
+    assert "set_parameter_expression" in str(guide)
+    assert "control_shader_timeline" in str(guide)
+
+    class Response:
+        status = 200
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+        def read(self) -> bytes:
+            return json.dumps(self.payload).encode()
+        def __enter__(self) -> "Response":
+            return self
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    wire = []
+    def opener(req: Any, timeout: Any = None) -> Response:
+        wire.append(req)
+        return Response({"ok": True, "ticket_id": "ticket_1", "status": "pending"} if req.get_method() == "POST"
+                        else {"client_request_id": "known_1", "status": "applied", "ticket_id": "ticket_1"})
+    transport = Client(opener=opener)
+    assert transport.control_shader_timeline(submit)["status"] == "pending"
+    assert transport.control_shader_timeline(status)["status"] == "applied"
+    assert [req.get_method() for req in wire] == ["POST", "GET"]
+    assert wire[0].full_url.endswith("/api/agent/shader-timeline-control")
+    assert json.loads(wire[0].data) == {key: value for key, value in submit.items() if key != "operation"}
+    assert wire[1].full_url.endswith("/api/agent/shader-timeline-control/requests/known_1")
+    assert all(req.get_header("X-hextile-agent") == "mcp" for req in wire)
+    with pytest.raises(HextileClientError):
+        transport.control_shader_timeline({**submit, "time_seconds": float("nan")})
+
+    lost = Client(opener=lambda *_a, **_kw: (_ for _ in ()).throw(urllib.error.URLError(TimeoutError())))
+    with pytest.raises(HextileClientError) as uncertain:
+        lost.control_shader_timeline(submit)
+    assert uncertain.value.kind == "shader_timeline_outcome_unknown"
+    assert uncertain.value.receipt == {"client_request_id": "known_1"}
+    missing = Client(opener=lambda req, timeout=None: (_ for _ in ()).throw(
+        urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b'{"detail":"outcome_unknown"}'))))
+    with pytest.raises(HextileClientError) as expired:
+        missing.control_shader_timeline(status)
+    assert expired.value.kind == "shader_timeline_outcome_unknown"
+    assert expired.value.receipt == {"client_request_id": "known_1", "status": "unknown"}
+
+    if importlib.util.find_spec("mcp") is not None:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        script = ("import sys; sys.path.insert(0, " + repr(str(ROOT / "mcp")) + "); "
+                  "import hextile_mcp; "
+                  "original=hextile_mcp.HextileMcpServer; "
+                  "hextile_mcp.HextileMcpServer=lambda: original(client=FakeClient(), child_token='test'); "
+                  "raise SystemExit(hextile_mcp.main())")
+        script = ("class FakeClient:\n"
+                  "    def control_shader_timeline(self, args):\n"
+                  "        return {'status':'applied','client_request_id':args['client_request_id']}\n"
+                  + script)
+        async def exercise_sdk() -> None:
+            params = StdioServerParameters(command=sys.executable, args=["-c", script])
+            async with stdio_client(params) as (reader, writer):
+                async with ClientSession(reader, writer) as session:
+                    await session.initialize()
+                    catalog = await session.list_tools()
+                    assert any(tool.name == "control_shader_timeline" for tool in catalog.tools)
+                    result = await session.call_tool("control_shader_timeline", status)
+                    assert result.isError is False
+                    assert json.loads(result.content[0].text)["status"] == "applied"
+        asyncio.run(exercise_sdk())
 
 
 _DOCTOR_ID = "123e4567-e89b-42d3-a456-426614174000"
@@ -155,7 +265,7 @@ def test_closed_modulation_catalog_and_existing_alternatives() -> None:
         del proposal["modulation_edits"]
         proposal[field] = value
         jsonschema.validate(proposal, schema)
-    variants = schema["properties"]["modulation_edits"]["properties"]["edits"]["items"]["oneOf"]
+    variants = schema["properties"]["modulation_edits"]["oneOf"][0]["properties"]["edits"]["items"]["oneOf"]
     assert {variant["properties"]["op"]["const"] for variant in variants} == {op["op"] for op in _operations()}
 
 
