@@ -13,6 +13,7 @@ import os
 import re
 import socket
 import uuid
+from fractions import Fraction
 from contextlib import contextmanager
 from contextvars import ContextVar
 import urllib.error
@@ -163,6 +164,101 @@ class HextileClientError(RuntimeError):
         self.body = body
         self.kind = kind  # app_down | upgrade | http | other
         self.receipt = dict(receipt) if receipt is not None else None
+
+
+_SHADER_SEQUENCE_REQUIRED = {
+    "shader_ref", "project_context_witness", "working_revision", "document_hash",
+    "source_hash", "idempotency_key", "name", "frame_rate", "frame_count",
+    "start_time", "end_time", "width", "height", "seed", "output", "publication_mode",
+}
+_SHADER_SEQUENCE_OPTIONAL = {"resource_manifest_hash", "selected_resource_frames"}
+
+
+def validate_shader_sequence_request(body: Mapping[str, Any]) -> None:
+    """Closed transport guard; APP remains authoritative for saved identity and resources."""
+    def refuse() -> None:
+        raise HextileClientError("Expected a closed saved-native Shader sequence request", kind="other", status_code=422)
+
+    def integer(value: Any, lo: int, hi: int) -> bool:
+        return type(value) is int and lo <= value <= hi
+
+    def text(value: Any, maximum: int) -> bool:
+        return type(value) is str and 1 <= len(value) <= maximum
+
+    def digest(value: Any) -> bool:
+        return type(value) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+
+    def rational(value: Any) -> Fraction:
+        if (type(value) is not dict or set(value) != {"num", "den"}
+                or any(type(value[key]) is not str or re.fullmatch(
+                    r"(0|[1-9][0-9]{0,31})" if key == "num" else r"[1-9][0-9]{0,31}",
+                    value[key]) is None for key in ("num", "den"))):
+            refuse()
+        result = Fraction(int(value["num"]), int(value["den"]))
+        if result.denominator != int(value["den"]):
+            refuse()
+        return result
+
+    if (not isinstance(body, Mapping) or not _SHADER_SEQUENCE_REQUIRED <= set(body)
+            or set(body) - _SHADER_SEQUENCE_REQUIRED - _SHADER_SEQUENCE_OPTIONAL
+            or body.get("publication_mode") != "deferred"):
+        refuse()
+    ref = body["shader_ref"]
+    if (type(ref) is not dict or set(ref) != {"origin", "id"}
+            or ref["origin"] not in ("builtin", "user", "project")
+            or type(ref["id"]) is not str or re.fullmatch(r"[a-zA-Z0-9_-]+", ref["id"]) is None):
+        refuse()
+    if (not text(body["project_context_witness"], 256) or not text(body["idempotency_key"], 128)
+            or not text(body["name"], 128) or not integer(body["working_revision"], 1, 2**63 - 1)
+            or not digest(body["document_hash"]) or not digest(body["source_hash"])):
+        refuse()
+    if "resource_manifest_hash" in body and body["resource_manifest_hash"] is not None and not digest(body["resource_manifest_hash"]):
+        refuse()
+    frames = body.get("selected_resource_frames")
+    if frames is not None:
+        if type(frames) is not list:
+            refuse()
+        for frame in frames:
+            if (type(frame) is not dict or set(frame) != {"slot_id", "frame_hash", "index", "width", "height"}
+                    or not text(frame["slot_id"], 256) or not digest(frame["frame_hash"])
+                    or not integer(frame["index"], 0, 2**31 - 1)
+                    or not integer(frame["width"], 1, 2**31 - 1)
+                    or not integer(frame["height"], 1, 2**31 - 1)):
+                refuse()
+    rate = body["frame_rate"]
+    if (type(rate) is not dict or set(rate) != {"num", "den"}
+            or not integer(rate["num"], 1, 1_000_000) or not integer(rate["den"], 1, 1_000_000)):
+        refuse()
+    fps = Fraction(rate["num"], rate["den"])
+    if fps.denominator != rate["den"] or not 1 <= fps <= 120:
+        refuse()
+    start, end = rational(body["start_time"]), rational(body["end_time"])
+    count = (end - start) * fps
+    expected_count = -(-count.numerator // count.denominator)
+    if (not 0 <= start < end <= 86400 or not integer(body["frame_count"], 1, 10000)
+            or body["frame_count"] != expected_count or not integer(body["seed"], 0, 2**32 - 1)
+            or not integer(body["width"], 4, 16384) or not integer(body["height"], 2, 8192)):
+        refuse()
+    output = body["output"]
+    if type(output) is not dict or "projection" not in output:
+        refuse()
+    projection = output["projection"]
+    if projection == "equirectangular":
+        if (set(output) != {"projection", "pan", "tilt", "roll"}
+                or any(type(output[key]) not in (int, float) or output[key] != 0 for key in ("pan", "tilt", "roll"))
+                or body["width"] != 2 * body["height"] or body["height"] % 2):
+            refuse()
+    elif projection in ("fulldome", "fulldome_angular"):
+        if (set(output) != {"projection", "diameter", "fov_deg", "pan", "tilt", "roll"}
+                or type(output["diameter"]) is not int or output["diameter"] not in (1024, 2048, 4096, 8192)
+                or body["width"] != output["diameter"] or body["height"] != output["diameter"]):
+            refuse()
+        for key, lo, hi in (("fov_deg", 10, 360), ("pan", -180, 180), ("tilt", -90, 90), ("roll", -180, 180)):
+            value = output[key]
+            if type(value) not in (int, float) or not math.isfinite(value) or not lo <= value <= hi:
+                refuse()
+    else:
+        refuse()
 
 
 # Transport shape only. The APP store alone resolves references, checks domains/grants,
@@ -790,6 +886,130 @@ class Client:
             dict(body),
             headers={"X-Hextile-Agent": "mcp"},
         )
+
+    @staticmethod
+    def _shader_sequence_error(exc: HextileClientError, *, uncertain: bool = False) -> HextileClientError:
+        code = None
+        try:
+            detail = json.loads(exc.body or "").get("detail")
+            if isinstance(detail, Mapping) and type(detail.get("code")) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", detail["code"]):
+                code = detail["code"]
+        except (ValueError, AttributeError, TypeError):
+            pass
+        if uncertain and (exc.kind == "app_down" or exc.status_code is None
+                          or exc.kind == "other" and exc.status_code is not None and 200 <= exc.status_code < 300):
+            return HextileClientError(
+                "Shader sequence POST outcome unknown. GET the preflight-known sequence_id and compare request_hash; never mint a new ID or blindly repost.",
+                status_code=exc.status_code, kind="shader_sequence_outcome_unknown",
+                receipt={"status": "unknown"})
+        return HextileClientError("Shader sequence refused or unavailable", status_code=exc.status_code,
+                                  kind=exc.kind, receipt={"code": code or "shader_sequence_refused"})
+
+    @staticmethod
+    def _shader_sequence_receipt(data: Any, *, preflight: bool) -> dict[str, Any]:
+        if not isinstance(data, Mapping):
+            raise HextileClientError("Invalid Shader sequence receipt", kind="other")
+        allowed = ("sequence_id", "status", "request_hash", "recipe_hash")
+        result = {key: data[key] for key in allowed if key in data and type(data[key]) is str}
+        if (re.fullmatch(r"seq_[0-9a-f]{32}", result.get("sequence_id", "")) is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", result.get("request_hash", "")) is None
+                or result.get("status") not in (("ready", "existing") if preflight else
+                                                ("queued", "processing", "completed", "completed_with_errors",
+                                                 "failed", "cancelled", "incomplete", "paused", "stopped"))):
+            raise HextileClientError("Invalid Shader sequence receipt", kind="other")
+        if "recipe_hash" in result and re.fullmatch(r"sha256:[0-9a-f]{64}", result["recipe_hash"]) is None:
+            raise HextileClientError("Invalid Shader sequence receipt", kind="other")
+        return result
+
+    def _shader_sequence_post(self, body: Mapping[str, Any], *, preflight: bool) -> dict[str, Any]:
+        validate_shader_sequence_request(body)
+        path = "/api/shaders/sequences/preflight" if preflight else "/api/shaders/sequences"
+        try:
+            data = self.post_json(path, dict(body),
+                                  headers={"X-Hextile-Project-Witness": body["project_context_witness"]})
+            return self._shader_sequence_receipt(data, preflight=preflight)
+        except HextileClientError as exc:
+            raise self._shader_sequence_error(exc, uncertain=not preflight) from exc
+
+    def preflight_shader_sequence(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        return self._shader_sequence_post(body, preflight=True)
+
+    def render_shader_sequence(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        return self._shader_sequence_post(body, preflight=False)
+
+    def get_shader_sequence(self, sequence_id: str) -> dict[str, Any]:
+        if type(sequence_id) is not str or re.fullmatch(r"seq_[0-9a-f]{32}", sequence_id) is None:
+            raise HextileClientError("Expected a known Shader sequence ID", kind="other", status_code=422)
+        try:
+            data = self.get_json(f"/api/shaders/sequences/{sequence_id}")
+        except HextileClientError as exc:
+            if exc.status_code == 404:
+                raise HextileClientError(
+                    "Known Shader sequence ID is absent; an uncertain render POST remains outcome unknown. Do not blindly repost.",
+                    status_code=404, kind="shader_sequence_outcome_unknown",
+                    receipt={"sequence_id": sequence_id, "status": "unknown"}) from exc
+            raise self._shader_sequence_error(exc) from exc
+        if not isinstance(data, Mapping) or data.get("sequence_id") != sequence_id:
+            raise HextileClientError("Invalid Shader sequence status", kind="other")
+        result: dict[str, Any] = {"sequence_id": sequence_id}
+        statuses = {"queued", "processing", "completed", "completed_with_errors", "failed",
+                    "cancelled", "paused", "incomplete", "stopped"}
+        if data.get("status") in statuses:
+            result["status"] = data["status"]
+        if data.get("publication_mode") == "deferred":
+            result["publication_mode"] = "deferred"
+        for key in ("request_hash", "recipe_hash", "render_identity"):
+            if type(data.get(key)) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", data[key]):
+                result[key] = data[key]
+        if type(data.get("attempt_id")) is str and re.fullmatch(r"attempt_[0-9a-f]{32}", data["attempt_id"]):
+            result["attempt_id"] = data["attempt_id"]
+        elif data.get("attempt_id") is None and "attempt_id" in data:
+            result["attempt_id"] = None
+        for key in ("frame_count", "width", "height", "published_cursor", "frames_pending",
+                    "frames_queued", "frames_processing", "frames_completed", "frames_failed", "attempt_revision"):
+            if type(data.get(key)) is int and data[key] >= 0:
+                result[key] = data[key]
+        if data.get("current_frame_index") is None and "current_frame_index" in data:
+            result["current_frame_index"] = None
+        elif type(data.get("current_frame_index")) is int and data["current_frame_index"] >= 0:
+            result["current_frame_index"] = data["current_frame_index"]
+        rate = data.get("frame_rate")
+        if isinstance(rate, Mapping) and all(type(rate.get(key)) is int and rate[key] > 0 for key in ("num", "den")):
+            result["frame_rate"] = {key: rate[key] for key in ("num", "den")}
+        for key in ("start_time", "end_time"):
+            value = data.get(key)
+            if isinstance(value, Mapping) and all(type(value.get(part)) is str and re.fullmatch(r"[0-9]{1,32}", value[part]) for part in ("num", "den")):
+                result[key] = {part: value[part] for part in ("num", "den")}
+        output = data.get("output")
+        if isinstance(output, Mapping) and output.get("projection") in ("equirectangular", "fulldome", "fulldome_angular"):
+            projected = {"projection": output["projection"]}
+            for key in ("diameter", "fov_deg", "pan", "tilt", "roll"):
+                value = output.get(key)
+                if type(value) in (int, float) and math.isfinite(value):
+                    projected[key] = value
+            result["output"] = projected
+        def attempt(source: Any) -> dict[str, Any] | None:
+            if not isinstance(source, Mapping):
+                return None
+            projected: dict[str, Any] = {}
+            for key in ("attempt_id", "transaction_fingerprint"):
+                pattern = r"attempt_[0-9a-f]{32}" if key == "attempt_id" else r"sha256:[0-9a-f]{64}"
+                if type(source.get(key)) is str and re.fullmatch(pattern, source[key]):
+                    projected[key] = source[key]
+            if source.get("status") in {"queued", "running", "interrupted", "completed", "failed", "cancelled"}:
+                projected["status"] = source["status"]
+            for key in ("attempt_revision", "frames_completed", "frames_failed", "quality_if_jpg"):
+                if type(source.get(key)) is int and source[key] >= 0:
+                    projected[key] = source[key]
+            if source.get("format") in ("PNG", "JPG"):
+                projected["format"] = source["format"]
+            return projected
+        if "folder_export" in data:
+            result["folder_export"] = attempt(data["folder_export"])
+        if isinstance(data.get("publication_attempts"), list):
+            result["publication_attempts"] = [attempt(item) for item in data["publication_attempts"][:8]
+                                              if isinstance(item, Mapping)]
+        return result
 
     def control_shader_timeline(self, args: Mapping[str, Any]) -> Any:
         """Submit once or recover the caller's known request ID; never poll the UI delivery door."""

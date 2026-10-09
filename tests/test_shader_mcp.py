@@ -114,6 +114,9 @@ def test_expression_timeline_mcp_schema_and_teaching() -> None:
     context_description = _schema("get_shader_context")["description"]
     assert "hx-math" in context_description and "parameter expression" in context_description
     assert "include_formula" in context_description and "include_source" in context_description
+    for name in ("preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence"):
+        assert _schema(name)["inputSchema"]["additionalProperties"] is False
+        assert name in guide["markdown"]
 
     class Response:
         status = 200

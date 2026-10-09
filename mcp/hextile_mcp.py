@@ -120,6 +120,9 @@ TOOL_NAMES = (
     "get_shader_context",
     "propose_shader",
     "control_shader_timeline",
+    "preflight_shader_sequence",
+    "render_shader_sequence",
+    "get_shader_sequence",
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
@@ -166,6 +169,8 @@ _READ_ONLY = frozenset(
         "preflight_spot_clone",
         "get_spot_clone",
         "get_shader_context",
+        "preflight_shader_sequence",
+        "get_shader_sequence",
         "get_shader_update",
         "get_shader_doctor",
     }
@@ -210,6 +215,7 @@ _MUTATING = frozenset(
         "clone_spot",
         "propose_shader",
         "control_shader_timeline",
+        "render_shader_sequence",
         "open_shader_workspace",
         "register_shader_update",
         "request_shader_doctor",
@@ -454,6 +460,12 @@ _WORKSPACE_GUIDANCE = (
     "Do not author source IDs, packets or live events or invent workspace flags in get_capabilities. "
     "Control authoring never arms Interact, presses keys, changes live pose, writes Project presets or self Applies. "
     "A shortcut conflict requires an explicit remap proposal, not a compiler-failure claim or Hotkeys override."
+    " Saved Shader native sequences use preflight_shader_sequence, render_shader_sequence, then "
+    "get_shader_sequence with the preflight-known deterministic ID and matching request_hash. "
+    "Require a confirmed human Apply and saved revision/hash, explicit deferred publication_mode, "
+    "exact rational interval/frame count and explicit native output. A lost render reply is recovered "
+    "by GET of that same ID; a missing ID leaves the outcome unknown. Folder publication is unavailable "
+    "through these Shader tools. Generic create_sequence/start_sequence remain folder upres."
 )
 
 
@@ -566,6 +578,41 @@ def _shader_edit_batch(schema: int, payloads: dict[str, Any]) -> dict[str, Any]:
 _SHADER_EDITS = {"oneOf": [_shader_edit_batch(1, _SHADER_EDIT_PAYLOADS),
                            _shader_edit_batch(2, _SHADER_EDIT_PAYLOADS_V2)]}
 _SHADER_DIGEST = {"type": "string", "pattern": r"^sha256:[0-9a-f]{64}$"}
+_SHADER_SEQUENCE_OUTPUT = {"oneOf": [
+    _shader_closed({"projection": {"const": "equirectangular"},
+                    "pan": {"const": 0}, "tilt": {"const": 0}, "roll": {"const": 0}}),
+    _shader_closed({"projection": {"enum": ["fulldome", "fulldome_angular"]},
+                    "diameter": {"enum": [1024, 2048, 4096, 8192]},
+                    "fov_deg": {"type": "number", "minimum": 10, "maximum": 360},
+                    "pan": {"type": "number", "minimum": -180, "maximum": 180},
+                    "tilt": {"type": "number", "minimum": -90, "maximum": 90},
+                    "roll": {"type": "number", "minimum": -180, "maximum": 180}}),
+]}
+_SHADER_SEQUENCE_REQUEST = _shader_closed({
+    "shader_ref": _shader_closed({"origin": {"enum": ["builtin", "user", "project"]},
+                                  "id": {"type": "string", "minLength": 1,
+                                         "pattern": r"^[a-zA-Z0-9_-]+$"}}),
+    "project_context_witness": {"type": "string", "minLength": 1, "maxLength": 256},
+    "working_revision": {"type": "integer", "minimum": 1},
+    "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST,
+    "resource_manifest_hash": {"oneOf": [_SHADER_DIGEST, {"type": "null"}]},
+    "selected_resource_frames": {"oneOf": [
+        {"type": "array", "items": _shader_closed({
+            "slot_id": _SHADER_TEXT, "frame_hash": _SHADER_DIGEST,
+            "index": {"type": "integer", "minimum": 0},
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}})}, {"type": "null"}]},
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 128},
+    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "frame_rate": _shader_closed({"num": {"type": "integer", "minimum": 1, "maximum": 1000000},
+                                  "den": {"type": "integer", "minimum": 1, "maximum": 1000000}}),
+    "frame_count": {"type": "integer", "minimum": 1, "maximum": 10000},
+    "start_time": _SHADER_RATIONAL, "end_time": _SHADER_RATIONAL,
+    "width": {"type": "integer", "minimum": 4, "maximum": 16384},
+    "height": {"type": "integer", "minimum": 2, "maximum": 8192},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "output": _SHADER_SEQUENCE_OUTPUT, "publication_mode": {"const": "deferred"},
+}, ("resource_manifest_hash", "selected_resource_frames"))
 _SHADER_BASE_PROPERTIES = {"shader": _shader_closed({"origin": {"enum": ["builtin", "user", "project"]}, "shaderId": {"type": "string", "minLength": 1, "pattern": r"^[a-zA-Z0-9_-]+$"}}),
     "project_context_witness": _SHADER_TEXT, "working_revision": {"type": "integer", "minimum": 1},
     "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST,
@@ -1832,6 +1879,24 @@ TOOLS: list[dict[str, Any]] = [
              "viewer_generation": {"type": "integer", "minimum": 0},
              "source_epoch": {"type": "integer", "minimum": 0}})},
         required=["operation", "client_request_id"]),
+    {"name": "preflight_shader_sequence",
+     "description": "Check a confirmed saved Shader revision and exact rational native interval without queuing. "
+                    "Use the returned deterministic sequence_id and request_hash for uncertain render recovery. "
+                    "Only explicit deferred native masters are supported; no folder or automatic publication.",
+     "inputSchema": _SHADER_SEQUENCE_REQUEST,
+     "annotations": _annotations("preflight_shader_sequence")},
+    {"name": "render_shader_sequence",
+     "description": "Queue only the exact saved Shader request already preflighted, with its caller-known "
+                    "idempotency_key and confirmed revision. On an uncertain reply, GET the known sequence_id "
+                    "and compare request_hash; unknown 404 is an unknown outcome, never blind repost. "
+                    "Produces verified native masters; folder publication is unavailable here.",
+     "inputSchema": _SHADER_SEQUENCE_REQUEST,
+     "annotations": _annotations("render_shader_sequence")},
+    _tool_def("get_shader_sequence",
+        "Read a source-free and path-free Shader sequence status by the caller-known ID. "
+        "For a lost render reply compare request_hash from preflight. A missing ID does not prove the POST failed.",
+        {"sequence_id": {"type": "string", "pattern": r"^seq_[0-9a-f]{32}$"}},
+        required=["sequence_id"]),
     {"name": "open_shader_workspace",
      "description": "Attach native files for a Project or My Library Shader. Open may materialize files and waits for trusted mounted ACK; no caller path or GLSL JSON. " + _WORKSPACE_GUIDANCE,
      "inputSchema": _shader_closed({
@@ -2132,6 +2197,9 @@ class HextileMcpServer:
             "get_shader_context": self._get_shader_context,
             "propose_shader": self._propose_shader,
             "control_shader_timeline": self._control_shader_timeline,
+            "preflight_shader_sequence": self._preflight_shader_sequence,
+            "render_shader_sequence": self._render_shader_sequence,
+            "get_shader_sequence": self._get_shader_sequence,
             "open_shader_workspace": self._open_shader_workspace,
             "register_shader_update": self._register_shader_update,
             "get_shader_update": self._get_shader_update,
@@ -2798,6 +2866,17 @@ class HextileMcpServer:
 
     def _control_shader_timeline(self, args: dict[str, Any]) -> Any:
         return self.client.control_shader_timeline(args)
+
+    def _preflight_shader_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.preflight_shader_sequence(args)
+
+    def _render_shader_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.render_shader_sequence(args)
+
+    def _get_shader_sequence(self, args: dict[str, Any]) -> Any:
+        if set(args) != {"sequence_id"}:
+            raise HextileClientError("Expected exact Shader sequence ID", kind="other", status_code=422)
+        return self.client.get_shader_sequence(args["sequence_id"])
 
     def _open_shader_workspace(self, args: dict[str, Any]) -> Any:
         validate_shader_workspace("open", args)

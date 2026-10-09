@@ -122,6 +122,9 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
 | `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
 | `control_shader_timeline` | Play, pause, seek, or reset the mounted Shader session through Follow and an exact owner witness; use its status branch with the same caller ID after an uncertain reply | **yes** |
+| `preflight_shader_sequence` | Check a confirmed saved Shader revision, exact rational interval and explicit native output; returns a deterministic sequence ID before queueing | no |
+| `render_shader_sequence` | Queue that exact saved-native deferred request using its original idempotency key; compare its request hash with preflight | **yes** |
+| `get_shader_sequence` | Read bounded native progress and verified masters by the known Shader sequence ID; private paths and source stay hidden | no |
 | `open_shader_workspace` | Acknowledge exact Project Shader attachment; v1 returns two native files, negotiated v2 returns the declared source set and metadata path. Follow installed `360-hextile` | **yes** |
 | `register_shader_update` | Register the acknowledged format-specific raw digest: v1 pair or complete v2 declared set, including unused helpers; automatic APP Prepare/compile checks, never Apply | **yes** |
 | `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
@@ -129,6 +132,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_shader_doctor` | Poll the exact Doctor request UUID and witness for bounded diagnostics without source, pixels or overlay mask | no |
 
 ### Selection guide
+
+For saved Shader animation, inspect typed targets with `get_shader_context`, propose the expression and timeline, then wait for human Apply and a confirmed Save receipt. Reread the saved revision and hashes before `preflight_shader_sequence` → `render_shader_sequence` → `get_shader_sequence`. Use exact rational endpoints, frame rate/count, explicit equirectangular or square Dome output and `publication_mode:"deferred"`. On an uncertain render reply, GET the preflight-known ID and compare `request_hash`; unknown 404 is still an unknown outcome. These tools produce native masters only. Folder publication and sequence control are not offered by this Shader MCP catalog. Generic `create_sequence`/`start_sequence` remain folder upres. See the runnable JSON in `get_guide(name="recipes")`.
 
 1. **Handshake** → `get_capabilities` then `get_live_context` before compose.
 2. **Learn** → `get_guide` (`best-practices` then `workflow-schema`).

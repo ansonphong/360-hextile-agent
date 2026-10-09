@@ -130,6 +130,9 @@ EXPECTED_TOOLS = (
     "get_shader_context",
     "propose_shader",
     "control_shader_timeline",
+    "preflight_shader_sequence",
+    "render_shader_sequence",
+    "get_shader_sequence",
     "open_shader_workspace",
     "register_shader_update",
     "get_shader_update",
@@ -795,7 +798,8 @@ def test_mcp_initialize() -> None:
     assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert "tools" in resp["result"]["capabilities"]
     instructions = resp["result"]["instructions"]
-    for term in ("current_surface", "executable_capabilities", "execution_ready", "conventions/1", "modulation/2", "keyboard/mouse", "MIDI/OSC/gamepad"):
+    for term in ("current_surface", "executable_capabilities", "execution_ready", "conventions/1", "modulation/2", "keyboard/mouse", "MIDI/OSC/gamepad",
+                 "preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence", "Folder publication is unavailable"):
         assert term in instructions
 
 
