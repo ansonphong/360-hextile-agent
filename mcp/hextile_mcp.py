@@ -530,12 +530,29 @@ _SHADER_SCALAR_REFS = {"type": "object", "maxProperties": 64,
 _SHADER_RATIONAL = _shader_closed({
     "num": {"type": "string", "pattern": r"^(0|[1-9][0-9]*)$"},
     "den": {"type": "string", "pattern": r"^[1-9][0-9]*$"}})
+_SHADER_TYPED_SIGNATURE_BASE = {"unit": {"type": "string", "minLength": 1},
+    "min": _SHADER_NUMBER, "max": _SHADER_NUMBER}
+_SHADER_TYPED_SIGNATURE = {"oneOf": [
+    _shader_closed({"kind": {"enum": ["float", "angle", "int", "bool", "vec2", "vec3", "vec4",
+                                      "color", "ramp_at", "ramp_color"]}, **_SHADER_TYPED_SIGNATURE_BASE}),
+    _shader_closed({"kind": {"const": "enum"}, **_SHADER_TYPED_SIGNATURE_BASE,
+                    "choices": {"type": "array", "minItems": 1, "uniqueItems": True,
+                                "items": {"type": "integer", "minimum": -(2**31), "maximum": 2**31 - 1}}}),
+]}
+_SHADER_MODE_BINDING_FIELDS = {"source_id": _SHADER_MOD_ID, "target": _SHADER_TEXT,
+    "signature": _SHADER_TYPED_SIGNATURE, "enabled": {"const": True}}
+_SHADER_MODE_BINDING = {"oneOf": [
+    _shader_closed({**_SHADER_MODE_BINDING_FIELDS, "mode": {"const": "range"},
+                    "range_min": _SHADER_NUMBER, "range_max": _SHADER_NUMBER}, ("enabled",)),
+    _shader_closed({**_SHADER_MODE_BINDING_FIELDS, "mode": {"const": "add"},
+                    "depth": {"type": "number", "minimum": 0}}, ("enabled",)),
+]}
 _SHADER_EDIT_PAYLOADS_V2 = {
     **_SHADER_EDIT_PAYLOADS,
     "set_parameter_expression": {"target": _SHADER_TEXT, "source_text": {"type": "string", "minLength": 1, "maxLength": 512}, "refs": _SHADER_SCALAR_REFS},
     "remove_parameter_expression": {"target": _SHADER_TEXT},
     "set_parameter_mode": {"target": _SHADER_TEXT, "mode": {"enum": ["fixed", "expression", "modulator"]},
-                           "binding": {"oneOf": [_shader_closed({"id": _SHADER_BINDING_ID}), _shader_binding(adding=True)]}},
+                           "binding": {"oneOf": [_shader_closed({"id": _SHADER_BINDING_ID}), _SHADER_MODE_BINDING]}},
     "set_timeline": {"start": _SHADER_RATIONAL, "end": _SHADER_RATIONAL, "loop": _SHADER_BOOL},
 }
 def _shader_edit_batch(schema: int, payloads: dict[str, Any]) -> dict[str, Any]:
@@ -1761,8 +1778,9 @@ TOOLS: list[dict[str, Any]] = [
         "get_shader_context",
         "Read the open Shader, including bounded source-free conventions/1, modulation/2 or /3, "
         "parameter-expressions/1, shader-timeline/1, stable typed parameter addresses, aliases and camera helpers. "
-        "GLSL and resolved authoring bytes require include_source "
-        "and its separate source grant; include_formula only grants hx-math formulas. "
+        "Default metadata omits both hx-math and parameter expression formula source. "
+        "include_formula requests both formula families under its separate grant; "
+        "GLSL and resolved authoring bytes require include_source and its independent source grant. "
         "Does not Import, delete, Accept a Board, prepare, or consume. "
         "Never returns an absolute path or pixels.",
         {
@@ -1771,7 +1789,7 @@ TOOLS: list[dict[str, Any]] = [
             "project_context_witness": {"type": "string", "minLength": 1},
             "include_source": {"type": "boolean", "default": False},
             "include_formula": {"type": "boolean", "default": False,
-                "description": "Explicitly include bounded hx-math formulas in metadata; never grants GLSL read."},
+                "description": "Explicitly include bounded hx-math and parameter-expression formulas in metadata; never grants GLSL read."},
             "working_revision": {"type": "integer", "minimum": 1},
         },
         required=["origin", "shader_id", "project_context_witness"],

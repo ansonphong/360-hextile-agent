@@ -40,9 +40,39 @@ def test_expression_timeline_mcp_schema_and_teaching() -> None:
         {"op": "set_timeline", "start": {"num": "0", "den": "1"},
          "end": {"num": "4", "den": "1"}, "loop": True}]}
     jsonschema.validate(proposal, _schema("propose_shader")["inputSchema"])
+    typed_binding = {"source_id": "mod_" + "a" * 24, "target": "shader.params.mode",
+                     "signature": {"kind": "enum", "unit": "unitless", "min": 0,
+                                   "max": 2, "choices": [0, 1, 2]},
+                     "mode": "range", "range_min": 0, "range_max": 2}
+    mode_proposal = {**proposal, "modulation_edits": {"schema": 2, "edits": [
+        {"op": "set_parameter_mode", "target": "shader.params.mode",
+         "mode": "modulator", "binding": typed_binding}]}}
+    jsonschema.validate(mode_proposal, _schema("propose_shader")["inputSchema"])
+    sys.path.insert(0, str(ROOT.parent / "360-HEXTILE-APP"))
+    from backend.modulation.contracts import _signature
+    assert _signature(typed_binding["signature"], "binding.signature", typed=True)["choices"] == [0, 1, 2]
+    for kind in ("int", "bool", "vec3", "ramp_color"):
+        signature = {"kind": kind, "unit": "unitless", "min": 0, "max": 1}
+        typed = {**mode_proposal, "modulation_edits": {"schema": 2, "edits": [
+            {**mode_proposal["modulation_edits"]["edits"][0],
+             "binding": {**typed_binding, "signature": signature}}]}}
+        jsonschema.validate(typed, _schema("propose_shader")["inputSchema"])
+        assert _signature(signature, "binding.signature", typed=True)["kind"] == kind
+    for malformed in ({**typed_binding, "source_id": {"id": "mod_" + "a" * 24}},
+                      {**typed_binding, "signature": {**typed_binding["signature"], "choices": []}}):
+        bad = {**mode_proposal, "modulation_edits": {"schema": 2, "edits": [
+            {**mode_proposal["modulation_edits"]["edits"][0], "binding": malformed}]}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, _schema("propose_shader")["inputSchema"])
     with mock.patch.object(Client, "post_json", return_value={"ticket_id": "spt_1"}) as post:
         assert Client().propose_shader(proposal) == {"ticket_id": "spt_1"}
-    assert post.call_args.args == ("/api/agent/shader-proposals", proposal)
+        assert Client().propose_shader(mode_proposal) == {"ticket_id": "spt_1"}
+    assert [call.args for call in post.call_args_list] == [
+        ("/api/agent/shader-proposals", proposal), ("/api/agent/shader-proposals", mode_proposal)]
+    proposal_client = mock.Mock()
+    proposal_client.propose_shader.return_value = {"ticket_id": "spt_mode", "kind": "shader_document_candidate"}
+    assert HextileMcpServer(client=proposal_client)._propose_shader(mode_proposal)["ticket_id"] == "spt_mode"
+    proposal_client.propose_shader.assert_called_once_with(mode_proposal)
     witness = {"studio_surface_id": "surface", "project_context_witness": "wit",
                "shader": {"origin": "user", "shaderId": "aurora"},
                "base": {"kind": "saved", "working_revision": 1,
@@ -75,6 +105,15 @@ def test_expression_timeline_mcp_schema_and_teaching() -> None:
     guide = load_guide("recipes")
     assert "set_parameter_expression" in str(guide)
     assert "control_shader_timeline" in str(guide)
+    example = json.loads(re.search(r"## Shader scalar expression and mounted timeline.*?```json\n(.*?)\n```",
+                                   guide["markdown"], re.S).group(1))
+    jsonschema.validate(example, _schema("propose_shader")["inputSchema"])
+    assert example["base"] == _proposal()["base"]
+    assert example["modulation_edits"]["schema"] == 2
+    assert "kind" not in example["base"]
+    context_description = _schema("get_shader_context")["description"]
+    assert "hx-math" in context_description and "parameter expression" in context_description
+    assert "include_formula" in context_description and "include_source" in context_description
 
     class Response:
         status = 200
