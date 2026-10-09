@@ -2347,6 +2347,19 @@ class HextileMcpServer:
         progress_token: Any = None,
         operation_id: Optional[str] = None,
     ) -> dict[str, Any]:
+        if not self.internal_mode:
+            try:
+                status = self.client.request_json("GET", "/api/agent/mcp-status")
+            except Exception:
+                return _err_result(error_payload(HextileClientError(
+                    "MCP availability could not be verified. Check 360 Hextile Settings → MCP and retry.",
+                    kind="mcp_disabled", status_code=403,
+                )))
+            if type(status) is not dict or status.get("enabled") is not True:
+                return _err_result(error_payload(HextileClientError(
+                    "MCP is disabled in 360 Hextile Settings. Enable it and retry.",
+                    kind="mcp_disabled", status_code=403,
+                )))
         call_id = str(uuid.uuid4())
         args = dict(arguments) if isinstance(arguments, dict) else {}
         for key in tuple(args):
@@ -2378,11 +2391,10 @@ class HextileMcpServer:
             if name == "generate_seed":
                 self._notify_progress(progress_token, 0)
             private_headers: dict[str, str] = {}
-            if self.internal_mode and operation_id:
-                private_headers = {
-                    "X-Hextile-Copilot-Token": str(self.child_token),
-                    "X-Hextile-Op": operation_id,
-                }
+            if self.internal_mode:
+                private_headers = {"X-Hextile-Copilot-Token": str(self.child_token)}
+                if operation_id:
+                    private_headers["X-Hextile-Op"] = operation_id
             bind_headers = getattr(self.client, "request_headers", None)
             header_context = bind_headers(private_headers) if bind_headers else nullcontext()
             with header_context:

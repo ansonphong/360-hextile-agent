@@ -377,6 +377,11 @@ class Client:
             req_headers["Content-Type"] = "application/json"
         if headers:
             req_headers.update(dict(headers))
+        # The APP gate must see every proxy request, including private Copilot calls.
+        for key in tuple(req_headers):
+            if key.lower() == "x-hextile-agent":
+                del req_headers[key]
+        req_headers["X-Hextile-Agent"] = "mcp"
         req = urllib.request.Request(
             url, data=data, headers=req_headers, method=method
         )

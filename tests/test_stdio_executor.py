@@ -8,6 +8,7 @@ import select
 import subprocess
 import sys
 import time
+import urllib.error
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -178,3 +179,139 @@ def test_describe_image_exact_body_timeout_and_text_only_result() -> None:
     ):
         assert server.call_tool("describe_image", rejected)["isError"] is True
     assert len(seen) == 1
+
+
+def test_external_gate_checks_each_call_before_activity_or_dispatch() -> None:
+    sys.path.insert(0, str(ROOT / "mcp"))
+    from hextile_client import Client
+    from hextile_mcp import HextileMcpServer
+
+    enabled = False
+    paths: list[str] = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, payload):  # noqa: ANN001
+            self.payload = payload
+
+        def read(self):  # noqa: ANN201
+            return json.dumps(self.payload).encode()
+
+        def __enter__(self):  # noqa: ANN201
+            return self
+
+        def __exit__(self, *args):  # noqa: ANN002, ANN201
+            return None
+
+    def opener(req, timeout):  # noqa: ANN001, ANN201
+        nonlocal enabled
+        assert req.get_header("X-hextile-agent") == "mcp"
+        paths.append(req.full_url.removeprefix("http://127.0.0.1:8000"))
+        if paths[-1] == "/api/agent/mcp-status":
+            return Response({"enabled": enabled})
+        if paths[-1] == "/api/agent/events":
+            return Response({"ok": True})
+        assert paths[-1] == "/api/renders/run_1"
+        return Response({"run_id": "run_1", "status": "running"})
+
+    server = HextileMcpServer(client=Client(opener=opener), child_token="")
+    listed = server.handle_rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+    assert listed is not None and listed["result"]["tools"]
+    assert paths == []
+    denied = server.call_tool("get_status", {"run_id": "run_1"})
+    assert denied["isError"] is True
+    assert "disabled" in denied["content"][0]["text"]
+    assert paths == ["/api/agent/mcp-status"]
+
+    enabled = True
+    allowed = server.call_tool("get_status", {"run_id": "run_1"})
+    assert allowed["isError"] is False
+    assert paths[1] == "/api/agent/mcp-status"
+    assert "/api/renders/run_1" in paths[2:]
+
+    paths.clear()
+    enabled = False
+    assert server.call_tool("get_status", {"run_id": "run_1"})["isError"] is True
+    assert paths == ["/api/agent/mcp-status"]
+
+
+def test_external_gate_fails_closed_on_bad_status() -> None:
+    sys.path.insert(0, str(ROOT / "mcp"))
+    from hextile_client import Client
+    from hextile_mcp import HextileMcpServer
+
+    class Response:
+        status = 200
+
+        def __init__(self, raw):  # noqa: ANN001
+            self.raw = raw
+
+        def read(self):  # noqa: ANN201
+            return self.raw
+
+        def __enter__(self):  # noqa: ANN201
+            return self
+
+        def __exit__(self, *args):  # noqa: ANN002, ANN201
+            return None
+
+    for raw in (b"{}", b'{"enabled": 1}', b'{"enabled": "true"}', b"[]", b"not json", None, 404, 503):
+        paths = []
+
+        def opener(req, timeout):  # noqa: ANN001, ANN201
+            paths.append(req.full_url)
+            assert req.full_url.endswith("/api/agent/mcp-status")
+            if raw is None:
+                raise urllib.error.URLError("offline")
+            if isinstance(raw, int):
+                raise urllib.error.HTTPError(req.full_url, raw, "unavailable", {}, io.BytesIO(b""))
+            return Response(raw)
+
+        server = HextileMcpServer(client=Client(opener=opener), child_token="")
+        result = server.call_tool("get_status", {"run_id": "run_1"})
+        assert result["isError"] is True
+        assert len(paths) == 1
+
+
+def test_request_marker_is_unoverridable_and_private_token_is_backend_checked() -> None:
+    sys.path.insert(0, str(ROOT / "mcp"))
+    from hextile_client import Client
+    from hextile_mcp import HextileMcpServer
+
+    seen = []
+
+    class Response:
+        status = 200
+
+        def read(self):  # noqa: ANN201
+            return b'{"run_id":"run_1","status":"running"}'
+
+        def __enter__(self):  # noqa: ANN201
+            return self
+
+        def __exit__(self, *args):  # noqa: ANN002, ANN201
+            return None
+
+    def opener(req, timeout):  # noqa: ANN001, ANN201
+        headers = {key.lower(): value for key, value in req.header_items()}
+        seen.append((req.full_url, headers))
+        assert headers["x-hextile-agent"] == "mcp"
+        if headers.get("x-hextile-copilot-token") == "fake":
+            raise urllib.error.HTTPError(req.full_url, 403, "forbidden", {}, io.BytesIO(b'{"detail":"mcp_disabled"}'))
+        return Response()
+
+    client = Client(opener=opener, internal_mode=True)
+    with client.request_headers({"X-Hextile-Agent": "unmarked"}):
+        client.request_json("GET", "/test", headers={"x-hextile-agent": "unmarked"})
+
+    real = HextileMcpServer(client=client, child_token="real")
+    assert real.call_tool("get_status", {"run_id": "run_1"})["isError"] is False
+    assert seen[-1][1]["x-hextile-copilot-token"] == "real"
+    assert all(not url.endswith("/api/agent/mcp-status") for url, _ in seen)
+
+    fake = HextileMcpServer(client=client, child_token="fake")
+    denied = fake.call_tool("get_status", {"run_id": "run_1"})
+    assert denied["isError"] is True
+    assert seen[-1][1]["x-hextile-copilot-token"] == "fake"
+    assert seen[-1][1]["x-hextile-agent"] == "mcp"
