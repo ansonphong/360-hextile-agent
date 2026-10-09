@@ -132,8 +132,8 @@ def test_expression_timeline_mcp_schema_and_teaching() -> None:
     wire = []
     def opener(req: Any, timeout: Any = None) -> Response:
         wire.append(req)
-        return Response({"ok": True, "ticket_id": "ticket_1", "status": "pending"} if req.get_method() == "POST"
-                        else {"client_request_id": "known_1", "status": "applied", "ticket_id": "ticket_1"})
+        return Response({"ok": True, "ticket_id": "123e4567-e89b-42d3-a456-426614174000", "status": "pending"} if req.get_method() == "POST"
+                        else {"client_request_id": "known_1", "status": "applied", "ticket_id": "123e4567-e89b-42d3-a456-426614174000"})
     transport = Client(opener=opener)
     assert transport.control_shader_timeline(submit)["status"] == "pending"
     assert transport.control_shader_timeline(status)["status"] == "applied"
@@ -156,6 +156,41 @@ def test_expression_timeline_mcp_schema_and_teaching() -> None:
         missing.control_shader_timeline(status)
     assert expired.value.kind == "shader_timeline_outcome_unknown"
     assert expired.value.receipt == {"client_request_id": "known_1", "status": "unknown"}
+
+    private = r"C:\private\shader-formula"
+    for code in (422, 500, 503):
+        def broken(req: Any, timeout: Any = None) -> Any:
+            raise urllib.error.HTTPError(req.full_url, code, private, {}, io.BytesIO(private.encode()))
+        result = HextileMcpServer(client=Client(opener=broken)).call_tool("control_shader_timeline", submit)
+        payload = json.loads(result["content"][0]["text"])
+        assert result["isError"] is True and private not in json.dumps(result)
+        assert payload["kind"] == ("shader_timeline_outcome_unknown" if code >= 500 else "http")
+        if code >= 500:
+            assert payload["receipt"]["client_request_id"] == "known_1"
+    result = HextileMcpServer(client=Client(opener=lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError(private)))).call_tool(
+        "control_shader_timeline", submit)
+    assert private not in json.dumps(result) and "trace" not in json.dumps(result)
+    assert json.loads(result["content"][0]["text"])["kind"] == "shader_timeline_outcome_unknown"
+    raw_client = mock.Mock()
+    raw_client.control_shader_timeline.side_effect = RuntimeError(private)
+    result = HextileMcpServer(client=raw_client).call_tool("control_shader_timeline", submit)
+    assert private not in json.dumps(result) and "trace" not in json.dumps(result)
+    def polluted(req: Any, timeout: Any = None) -> Response:
+        if req.get_method() == "GET":
+            return Response({"ticket_id": "123e4567-e89b-42d3-a456-426614174000", "status": "applied",
+                             "action": "seek", "source": private, "trace": private})
+        return Response({"ok": True, "ticket_id": "123e4567-e89b-42d3-a456-426614174000",
+                         "status": "pending", "source": private})
+    clean = Client(opener=polluted)
+    assert private not in json.dumps(clean.control_shader_timeline(submit))
+    assert private not in json.dumps(clean.control_shader_timeline(status))
+    def refused(req: Any, timeout: Any = None) -> Response:
+        return Response({"ticket_id": "123e4567-e89b-42d3-a456-426614174000",
+                         "status": "refused", "action": "seek", "reason": "preview_unavailable",
+                         "source": private})
+    assert Client(opener=refused).control_shader_timeline(status) == {
+        "client_request_id": "known_1", "ticket_id": "123e4567-e89b-42d3-a456-426614174000",
+        "status": "refused", "action": "seek", "reason": "preview_unavailable"}
 
     if importlib.util.find_spec("mcp") is not None:
         from mcp import ClientSession, StdioServerParameters

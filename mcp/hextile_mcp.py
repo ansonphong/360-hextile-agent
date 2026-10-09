@@ -2434,12 +2434,32 @@ class HextileMcpServer:
             )
             return _err_result(safe_error)
         except Exception as exc:  # noqa: BLE001
+            if name == "control_shader_timeline":
+                request_id = args.get("client_request_id")
+                submit = args.get("operation") == "submit"
+                safe = HextileClientError(
+                    "Shader timeline outcome unknown; check status with the caller-known client_request_id."
+                    if submit else "Shader timeline status unavailable",
+                    kind="shader_timeline_outcome_unknown" if submit else "other",
+                    receipt={"client_request_id": request_id} if submit and type(request_id) is str
+                    and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request_id) else None,
+                )
+                self._emit_activity(tool=name, call_id=call_id, phase="failed",
+                                    error={"kind": safe.kind, "status_code": None, "message": str(safe)},
+                                    overrides_keys=overrides_keys)
+                return _err_result(error_payload(safe))
             if name in {"preflight_shader_sequence", "render_shader_sequence", "get_shader_sequence",
                         "control_shader_sequence", "preflight_shader_sequence_export", "export_shader_sequence"}:
                 uncertain = name in {"render_shader_sequence", "control_shader_sequence", "export_shader_sequence"}
+                recovery = ("Shader export POST outcome unknown. GET the preflight-known sequence_id and "
+                            "compare attempt_id and transaction_fingerprint; never blindly repost."
+                            if name == "export_shader_sequence" else
+                            "Shader control POST outcome unknown. GET the known sequence_id and exact attempt_id "
+                            "before another action." if name == "control_shader_sequence" else
+                            "Shader sequence POST outcome unknown. GET the preflight-known sequence_id and "
+                            "compare request_hash; never mint a new ID or blindly repost.")
                 safe = HextileClientError(
-                    "Shader sequence POST outcome unknown. GET the preflight-known sequence_id and compare request_hash; never mint a new ID or blindly repost."
-                    if uncertain else "Shader sequence operation unavailable",
+                    recovery if uncertain else "Shader sequence operation unavailable",
                     kind="shader_sequence_outcome_unknown" if uncertain else "other",
                     receipt={"status": "unknown"} if uncertain else None,
                 )

@@ -1046,7 +1046,7 @@ class Client:
         return sid, body
 
     @staticmethod
-    def _shader_export_receipt(data: Any, sequence_id: str) -> dict[str, Any]:
+    def _shader_export_receipt(data: Any, sequence_id: str, *, preflight: bool) -> dict[str, Any]:
         if not isinstance(data, Mapping) or data.get("sequence_id") != sequence_id:
             raise HextileClientError("Invalid Shader export receipt", kind="other")
         result = {"sequence_id": sequence_id}
@@ -1059,8 +1059,10 @@ class Client:
         if ("attempt_id" not in result or "transaction_fingerprint" not in result
                 or result["attempt_id"] != "attempt_" + result["transaction_fingerprint"][7:39]):
             raise HextileClientError("Invalid Shader export receipt", kind="other")
-        if data.get("status") in {"ready", "existing", "queued", "running", "completed", "failed", "cancelled", "interrupted"}:
-            result["status"] = data["status"]
+        allowed_status = {"ready", "existing"} if preflight else {"queued", "existing"}
+        if type(data.get("status")) is not str or data["status"] not in allowed_status:
+            raise HextileClientError("Invalid Shader export receipt", kind="other", status_code=202)
+        result["status"] = data["status"]
         if type(data.get("attempt_revision")) is int and data["attempt_revision"] >= 0:
             result["attempt_revision"] = data["attempt_revision"]
         return result
@@ -1069,7 +1071,7 @@ class Client:
         sid, body = self._shader_export_args(args, submit=False)
         try:
             data = self.post_json(f"/api/shaders/sequences/{sid}/export/preflight", body)
-            return self._shader_export_receipt(data, sid)
+            return self._shader_export_receipt(data, sid, preflight=True)
         except HextileClientError as exc:
             raise self._shader_sequence_error(exc) from exc
         except Exception as exc:
@@ -1079,7 +1081,7 @@ class Client:
         sid, body = self._shader_export_args(args, submit=True)
         try:
             data = self.post_json(f"/api/shaders/sequences/{sid}/export", body)
-            receipt = self._shader_export_receipt(data, sid)
+            receipt = self._shader_export_receipt(data, sid, preflight=False)
             if receipt["transaction_fingerprint"] != body["transaction_fingerprint"]:
                 raise HextileClientError("Invalid Shader export acknowledgement", kind="other", status_code=202)
             return receipt
@@ -1116,15 +1118,24 @@ class Client:
                                   {"attempt_id": attempt} if attempt is not None else None)
             if not isinstance(data, Mapping) or data.get("sequence_id") != sid:
                 raise HextileClientError("Invalid Shader sequence control acknowledgement", kind="other", status_code=202)
+            statuses = {"queued", "processing", "completed", "completed_with_errors", "failed",
+                        "cancelled", "paused", "incomplete", "stopped"} if attempt is None else {
+                        "queued", "running", "completed", "failed", "cancelled", "interrupted"}
+            if type(data.get("status")) is not str or data["status"] not in statuses:
+                raise HextileClientError("Invalid Shader sequence control acknowledgement", kind="other", status_code=202)
+            if attempt is not None:
+                folder = data.get("folder_export")
+                if (not isinstance(folder, Mapping) or folder.get("attempt_id") != attempt
+                        or folder.get("status") != data["status"]):
+                    raise HextileClientError("Invalid Shader export control acknowledgement", kind="other", status_code=202)
             result = {"sequence_id": sid, "action": action}
-            if data.get("status") in {"queued", "processing", "completed", "completed_with_errors", "failed",
-                                      "cancelled", "paused", "incomplete", "stopped", "running", "interrupted"}:
-                result["status"] = data["status"]
+            result["status"] = data["status"]
             if attempt is not None:
                 result["attempt_id"] = attempt
             return result
         except HextileClientError as exc:
-            if exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500:
+            if (exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500
+                    or exc.kind == "other" and 200 <= exc.status_code < 300):
                 raise HextileClientError(
                     "Shader control POST outcome unknown. GET the known sequence_id and exact attempt_id before another action.",
                     status_code=exc.status_code, kind="shader_sequence_outcome_unknown",
@@ -1134,6 +1145,47 @@ class Client:
             raise HextileClientError(
                 "Shader control POST outcome unknown. GET the known sequence_id and exact attempt_id before another action.",
                 kind="shader_sequence_outcome_unknown", receipt={"status": "unknown"}) from exc
+
+    @staticmethod
+    def _shader_timeline_receipt(data: Any, request_id: str, *, submit: bool) -> dict[str, Any]:
+        reasons = {"stale_snapshot", "wrong_owner", "follow_off", "expired", "studio_closed",
+                   "cancelled", "preview_unavailable", "outcome_unconfirmed"}
+        if (not isinstance(data, Mapping) or (submit and data.get("ok") is not True)
+                or "client_request_id" in data and data["client_request_id"] != request_id
+                or type(data.get("ticket_id")) is not str):
+            raise HextileClientError("Invalid Shader timeline receipt", kind="other", status_code=200)
+        try:
+            if str(uuid.UUID(data["ticket_id"])) != data["ticket_id"]:
+                raise ValueError("noncanonical")
+        except (ValueError, AttributeError):
+            raise HextileClientError("Invalid Shader timeline receipt", kind="other", status_code=200) from None
+        status = data.get("status")
+        if type(status) is not str or status not in {"pending", "applied", "refused", "unknown"}:
+            raise HextileClientError("Invalid Shader timeline receipt", kind="other", status_code=200)
+        result = {"client_request_id": request_id, "ticket_id": data["ticket_id"], "status": status}
+        if "action" in data:
+            if type(data["action"]) is not str or data["action"] not in {"play", "pause", "seek", "reset"}:
+                raise HextileClientError("Invalid Shader timeline receipt", kind="other", status_code=200)
+            result["action"] = data["action"]
+        if "reason" in data:
+            if type(data["reason"]) is not str or data["reason"] not in reasons:
+                raise HextileClientError("Invalid Shader timeline receipt", kind="other", status_code=200)
+            result["reason"] = data["reason"]
+        return result
+
+    @staticmethod
+    def _shader_timeline_error(exc: HextileClientError) -> HextileClientError:
+        code = None
+        try:
+            detail = json.loads(exc.body or "").get("detail")
+            if type(detail) is str and detail in {"invalid_external_authority", "request_conflict",
+                                                      "follow_off", "stale_snapshot", "apply_busy",
+                                                      "invalid_client_request_id"}:
+                code = detail
+        except (ValueError, AttributeError, TypeError):
+            pass
+        return HextileClientError("Shader timeline refused or unavailable", kind=exc.kind,
+                                  status_code=exc.status_code, receipt={"code": code} if code else None)
 
     def control_shader_timeline(self, args: Mapping[str, Any]) -> Any:
         """Submit once or recover the caller's known request ID; never poll the UI delivery door."""
@@ -1145,15 +1197,18 @@ class Client:
             if set(args) != {"operation", "client_request_id"}:
                 raise HextileClientError("Expected exact timeline status arguments", kind="other", status_code=422)
             try:
-                return self.get_json(f"/api/agent/shader-timeline-control/requests/{request_id}",
+                data = self.get_json(f"/api/agent/shader-timeline-control/requests/{request_id}",
                                      headers={"X-Hextile-Agent": "mcp"})
+                return self._shader_timeline_receipt(data, request_id, submit=False)
             except HextileClientError as exc:
                 if exc.status_code == 404:
                     raise HextileClientError(
                         f"Shader timeline outcome unknown for client_request_id={request_id}; expiry or absence is not refusal.",
                         kind="shader_timeline_outcome_unknown", status_code=404,
                         receipt={"client_request_id": request_id, "status": "unknown"}) from exc
-                raise
+                raise self._shader_timeline_error(exc) from exc
+            except Exception as exc:
+                raise HextileClientError("Shader timeline status unavailable", kind="other") from exc
         if operation != "submit" or not {"operation", "client_request_id", "action", "witness"} <= set(args):
             raise HextileClientError("Expected exact timeline submit arguments", kind="other", status_code=422)
         action = args["action"]
@@ -1187,17 +1242,23 @@ class Client:
                 f"Shader timeline outcome unknown for client_request_id={request_id}; use status with this ID.",
                 kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id}) from exc
         except HextileClientError as exc:
-            if exc.kind == "app_down" or (exc.kind == "other" and exc.status_code is not None
-                                          and 200 <= exc.status_code < 300):
+            if (exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500
+                    or exc.kind == "other" and exc.status_code is not None
+                    and 200 <= exc.status_code < 300):
                 raise HextileClientError(
                     f"Shader timeline outcome unknown for client_request_id={request_id}; use status with this ID.",
                     kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id}) from exc
-            raise
-        if not isinstance(receipt, dict) or receipt.get("status") not in {"pending", "applied", "refused", "unknown"}:
+            raise self._shader_timeline_error(exc) from exc
+        except Exception as exc:
+            raise HextileClientError(
+                f"Shader timeline outcome unknown for client_request_id={request_id}; use status with this ID.",
+                kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id}) from exc
+        try:
+            return self._shader_timeline_receipt(receipt, request_id, submit=True)
+        except HextileClientError as exc:
             raise HextileClientError(
                 f"Shader timeline acknowledgement unknown for client_request_id={request_id}; use status with this ID.",
-                kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id})
-        return receipt
+                kind="shader_timeline_outcome_unknown", receipt={"client_request_id": request_id}) from exc
 
     def request_shader_doctor(self, args: Mapping[str, Any]) -> Any:
         """Submit once; an uncertain outcome is reconciled only by exact-ID GET."""

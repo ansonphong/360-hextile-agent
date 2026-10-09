@@ -335,7 +335,8 @@ def test_shader_render_export_mcp_tool_chain() -> None:
                              "transaction_fingerprint": digest, "status": "queued",
                              "destination_folder": "C:\\private\\frames"})
         if req.full_url.endswith(("/stop", "/resume", "/export/cancel", "/export/retry")):
-            return Response({"sequence_id": sid, "status": "queued", "path": "C:\\private"})
+            return Response({"sequence_id": sid, "status": "queued", "path": "C:\\private",
+                             "folder_export": {"attempt_id": attempt, "status": "queued"}})
         if req.get_method() == "POST":
             return Response({"sequence_id": sid, "status": "queued", "request_hash": digest,
                              "recipe_hash": digest})
@@ -383,6 +384,27 @@ def test_shader_render_export_mcp_tool_chain() -> None:
         lost.export_shader_sequence({**folder, "transaction_fingerprint": digest})
     assert uncertain_export.value.kind == "shader_sequence_outcome_unknown"
     assert "Chosen" not in str(uncertain_export.value)
+    for bad in ({"sequence_id": sid, "status": 17},
+                {"sequence_id": sid},
+                {"sequence_id": "seq_" + "f" * 32, "status": "queued"}):
+        malformed = Client(opener=lambda *_a, _bad=bad, **_kw: Response(_bad))
+        for action_args in ({"sequence_id": sid, "action": "stop"},
+                            {"sequence_id": sid, "action": "retry_export", "attempt_id": attempt}):
+            with pytest.raises(HextileClientError) as control_unknown:
+                malformed.control_shader_sequence(action_args)
+            assert control_unknown.value.kind == "shader_sequence_outcome_unknown"
+            assert "GET" in str(control_unknown.value)
+    for bad in ({"sequence_id": sid, "attempt_id": attempt,
+                 "transaction_fingerprint": digest, "status": 17},
+                {"sequence_id": sid, "attempt_id": attempt,
+                 "transaction_fingerprint": digest},
+                {"sequence_id": "seq_" + "f" * 32, "attempt_id": attempt,
+                 "transaction_fingerprint": digest, "status": "queued"}):
+        malformed = Client(opener=lambda *_a, _bad=bad, **_kw: Response(_bad))
+        with pytest.raises(HextileClientError) as export_unknown:
+            malformed.export_shader_sequence({**folder, "transaction_fingerprint": digest})
+        assert export_unknown.value.kind == "shader_sequence_outcome_unknown"
+        assert "GET" in str(export_unknown.value)
     missing = Client(opener=_http_error_opener(404, "C:\\private\\formula"))
     with pytest.raises(HextileClientError) as unknown:
         missing.get_shader_sequence(sid)
