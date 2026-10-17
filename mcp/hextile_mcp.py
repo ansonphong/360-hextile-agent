@@ -2179,6 +2179,13 @@ def _activity_outcome(name: str, data: Any) -> Optional[str]:
     return None
 
 
+def _activity_ticket(name: str, data: Any) -> Optional[str]:
+    if name not in {"apply_config_delta", "set_shader_parameter"} or not isinstance(data, Mapping):
+        return None
+    value = data.get("ticket_id")
+    return value if type(value) is str and _ACTIVITY_ID.fullmatch(value) else None
+
+
 def _layer_receipt(name: str, data: Any, *, internal_mode: bool = False) -> dict[str, Any]:
     """Project APP's private generation payload into bounded MCP facts."""
     if not isinstance(data, Mapping):
@@ -2511,6 +2518,7 @@ class HextileMcpServer:
                 overrides_keys=overrides_keys,
                 subject=_activity_subject(name, args, data),
                 outcome=_activity_outcome(name, data),
+                ticket_id=_activity_ticket(name, data),
             )
             return _ok_result(data)
         except HextileClientError as exc:
@@ -2640,6 +2648,7 @@ class HextileMcpServer:
         overrides_keys: Optional[list[str]] = None,
         subject: Optional[Mapping[str, str]] = None,
         outcome: Optional[str] = None,
+        ticket_id: Optional[str] = None,
     ) -> None:
         if self.internal_mode:
             return
@@ -2659,6 +2668,8 @@ class HextileMcpServer:
             envelope["subject"] = dict(subject)
         if outcome in _ACTIVITY_OUTCOMES:
             envelope["outcome"] = outcome
+        if ticket_id is not None:
+            envelope["ticket_id"] = ticket_id
         if run:
             run_body: dict[str, Any] = {}
             if run.get("run_id") is not None:

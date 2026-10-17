@@ -147,7 +147,7 @@ def test_mcp_activity_minilog_projects_only_confirmed_safe_facts() -> None:
     server = HextileMcpServer(client=client, child_token="")
     server.client_name = "Codex <private-host-name>"
     server._handlers["get_status"] = lambda _args: {"run_id": "run_1", "status": "running"}
-    server._handlers["set_shader_parameter"] = lambda _args: {"status": "pending", "ticket_id": "secret-ticket"}
+    server._handlers["set_shader_parameter"] = lambda _args: {"status": "pending", "ticket_id": "ticket_1"}
     server._handlers["save_workflow"] = lambda _args: {"id": "new_workflow", "document": "secret-document"}
 
     assert server.call_tool("get_status", {"run_id": "run_1"})["isError"] is False
@@ -157,6 +157,7 @@ def test_mcp_activity_minilog_projects_only_confirmed_safe_facts() -> None:
     assert [row.get("outcome") for row in client.events if row["phase"] == "succeeded"] == [None, "pending", "saved"]
     assert client.events[0]["subject"] == {"kind": "run", "id": "run_1"}
     assert client.events[2]["subject"] == {"kind": "shader", "id": "aurora"}
+    assert client.events[3]["ticket_id"] == "ticket_1"
     assert client.events[4]["subject"] == {"kind": "workflow", "id": "new_workflow"}
     assert all(row["client_name"] == "Codex" for row in client.events)
     assert all("secret" not in json.dumps(row) and "private" not in json.dumps(row) for row in client.events)
