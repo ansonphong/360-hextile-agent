@@ -128,6 +128,40 @@ def test_internal_meta_headers_and_activity_suppression() -> None:
     assert seen == [("headers", "child-secret", "op_1"), ("status", "run_1", None)]
 
 
+def test_mcp_activity_minilog_projects_only_confirmed_safe_facts() -> None:
+    sys.path.insert(0, str(ROOT / "mcp"))
+    from hextile_mcp import HextileMcpServer
+
+    class FakeClient:
+        def __init__(self):
+            self.events = []
+
+        def request_json(self, method, path):  # noqa: ANN001
+            assert (method, path) == ("GET", "/api/agent/mcp-status")
+            return {"enabled": True}
+
+        def post_activity(self, envelope):  # noqa: ANN001
+            self.events.append(envelope)
+
+    client = FakeClient()
+    server = HextileMcpServer(client=client, child_token="")
+    server.client_name = "Codex <private-host-name>"
+    server._handlers["get_status"] = lambda _args: {"run_id": "run_1", "status": "running"}
+    server._handlers["set_shader_parameter"] = lambda _args: {"status": "pending", "ticket_id": "secret-ticket"}
+    server._handlers["save_workflow"] = lambda _args: {"id": "new_workflow", "document": "secret-document"}
+
+    assert server.call_tool("get_status", {"run_id": "run_1"})["isError"] is False
+    assert server.call_tool("set_shader_parameter", {"witness": {"shader": {"shaderId": "aurora"}},
+                                                     "value": "secret-value"})["isError"] is False
+    assert server.call_tool("save_workflow", {"id": "new_workflow", "document": {"prompt": "secret-prompt"}})["isError"] is False
+    assert [row.get("outcome") for row in client.events if row["phase"] == "succeeded"] == [None, "pending", "saved"]
+    assert client.events[0]["subject"] == {"kind": "run", "id": "run_1"}
+    assert client.events[2]["subject"] == {"kind": "shader", "id": "aurora"}
+    assert client.events[4]["subject"] == {"kind": "workflow", "id": "new_workflow"}
+    assert all(row["client_name"] == "Codex" for row in client.events)
+    assert all("secret" not in json.dumps(row) and "private" not in json.dumps(row) for row in client.events)
+
+
 def test_describe_image_exact_body_timeout_and_text_only_result() -> None:
     sys.path.insert(0, str(ROOT / "mcp"))
     from hextile_client import Client

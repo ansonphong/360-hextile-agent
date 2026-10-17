@@ -2138,6 +2138,47 @@ def _seed_activity(name: str, args: Mapping[str, Any], payload: Any = None) -> O
     return seed
 
 
+_ACTIVITY_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+_ACTIVITY_OUTCOMES = frozenset({"pending", "applied", "saved", "refused", "unknown"})
+
+
+def _activity_subject(name: str, args: Mapping[str, Any], payload: Any = None) -> dict[str, str]:
+    """Project only known tool identities; never copy a path or an arbitrary result."""
+    kind, value = "app", None
+    if name == "open_shader_workspace" and isinstance(payload, Mapping):
+        kind, value = "workspace", payload.get("handle")
+    elif name in {"save_workflow", "delete_workflow", "get_workflow", "run_workflow"}:
+        kind, value = "workflow", args.get("workflow_id") or args.get("id")
+    elif name in {"get_status", "get_render_config", "get_logs", "cancel_run", "retry_run"}:
+        kind, value = "run", args.get("run_id")
+    elif name in {"generate_seed", "get_seed_job", "cancel_seed"}:
+        kind, value = "seed", args.get("request_id") if name == "generate_seed" else args.get("job_id")
+    elif name in {"get_sequence", "start_sequence", "stop_sequence", "control_shader_sequence"}:
+        kind, value = "sequence", args.get("sequence_id")
+    elif name in {"get_batch", "get_batch_items", "pause_batch", "resume_batch", "cancel_batch", "retry_batch"}:
+        kind, value = "batch", args.get("job_id")
+    elif name.startswith("shader_") or "shader" in name:
+        shader = args.get("shader")
+        witness = args.get("witness")
+        if not isinstance(shader, Mapping) and isinstance(witness, Mapping):
+            shader = witness.get("shader")
+        kind, value = "shader", shader.get("shaderId") if isinstance(shader, Mapping) else args.get("shader_id")
+    elif name in _LAYER_TOOLS or name in _SPOT_CLONE_TOOLS or name in {"export_render_file", "export_to_unreal_project"}:
+        kind, value = "render", args.get("render_id")
+    if type(value) is str and _ACTIVITY_ID.fullmatch(value):
+        return {"kind": kind, "id": value}
+    return {"kind": kind}
+
+
+def _activity_outcome(name: str, data: Any) -> Optional[str]:
+    if name in {"apply_config_delta", "set_shader_parameter"} and isinstance(data, Mapping):
+        status = data.get("status")
+        return status if isinstance(status, str) and status in _ACTIVITY_OUTCOMES else None
+    if name == "save_workflow" and isinstance(data, Mapping):
+        return "saved" if data.get("id") or data.get("workflow_id") else None
+    return None
+
+
 def _layer_receipt(name: str, data: Any, *, internal_mode: bool = False) -> dict[str, Any]:
     """Project APP's private generation payload into bounded MCP facts."""
     if not isinstance(data, Mapping):
@@ -2412,6 +2453,7 @@ class HextileMcpServer:
             tool=name, call_id=call_id, phase="started",
             seed=_seed_activity(name, args),
             overrides_keys=overrides_keys,
+            subject=_activity_subject(name, args),
         )
         handler = self._handlers.get(name)
         if handler is None:
@@ -2467,6 +2509,8 @@ class HextileMcpServer:
                 run=run,
                 seed=_seed_activity(name, args, data),
                 overrides_keys=overrides_keys,
+                subject=_activity_subject(name, args, data),
+                outcome=_activity_outcome(name, data),
             )
             return _ok_result(data)
         except HextileClientError as exc:
@@ -2594,6 +2638,8 @@ class HextileMcpServer:
         seed: Optional[Mapping[str, str]] = None,
         error: Optional[Mapping[str, Any]] = None,
         overrides_keys: Optional[list[str]] = None,
+        subject: Optional[Mapping[str, str]] = None,
+        outcome: Optional[str] = None,
     ) -> None:
         if self.internal_mode:
             return
@@ -2604,7 +2650,15 @@ class HextileMcpServer:
             "call_id": call_id,
             "tool": tool,
             "phase": phase,
+            "client_name": next((label for prefix, label in (
+                ("claude", "Claude Code"), ("codex", "Codex"), ("grok", "Grok"),
+                ("cursor", "Cursor"), ("gemini", "Gemini"),
+            ) if (self.client_name or "").casefold().startswith(prefix)), "MCP client"),
         }
+        if subject is not None:
+            envelope["subject"] = dict(subject)
+        if outcome in _ACTIVITY_OUTCOMES:
+            envelope["outcome"] = outcome
         if run:
             run_body: dict[str, Any] = {}
             if run.get("run_id") is not None:
