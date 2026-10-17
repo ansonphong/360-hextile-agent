@@ -128,6 +128,8 @@ EXPECTED_TOOLS = (
     "clone_spot",
     "get_spot_clone",
     "get_shader_context",
+    "get_shader_parameters",
+    "set_shader_parameter",
     "propose_shader",
     "control_shader_timeline",
     "preflight_shader_sequence",
@@ -201,6 +203,9 @@ def test_open4_annotations_partition() -> None:
     assert {"preflight_spot_clone", "get_spot_clone"} <= _READ_ONLY
     assert "clone_spot" in _MUTATING
     assert "get_shader_context" in _READ_ONLY
+    assert "get_shader_parameters" in _READ_ONLY
+    assert "set_shader_parameter" in _MUTATING
+    assert "set_shader_parameter" not in _DESTRUCTIVE
     assert "propose_shader" in _MUTATING
     assert "propose_shader" not in _DESTRUCTIVE
     assert "get_shader_update" in _READ_ONLY

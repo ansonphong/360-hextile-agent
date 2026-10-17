@@ -120,6 +120,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `restore_hotkey` | Restore one Hotkey to its factory bindings | **yes** |
 | `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
 | `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
+| `get_shader_parameters` | Read exposed mounted Shader parameter IDs, labels, types, bounds, choices and values with a fresh witness. MCP enabled; no source grant or Follow needed for this read | no |
+| `set_shader_parameter` | Set one value with that exact witness while MCP and Follow are on; use `operation=status` and the original `client_request_id` after an uncertain reply. APP checks runtime bounds, writability and conflicts | **yes** |
 | `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
 | `control_shader_timeline` | Play, pause, seek, or reset the mounted Shader session through Follow and an exact owner witness; use its status branch with the same caller ID after an uncertain reply | **yes** |
 | `preflight_shader_sequence` | Check a confirmed saved Shader revision, exact rational interval and explicit native output; returns a deterministic sequence ID before queueing | no |

@@ -32,6 +32,109 @@ def _schema(name: str) -> dict[str, Any]:
     return next(tool for tool in TOOLS if tool["name"] == name)
 
 
+def _parameter_witness() -> dict[str, Any]:
+    return {"studio_surface_id": "surface", "project_context_witness": "wit",
+            "shader": {"origin": "user", "shaderId": "aurora"},
+            "base": {"working_revision": 1, "manifest_hash": None,
+                     "document_hash": "sha256:" + "ab" * 32,
+                     "source_hash": "sha256:" + "cd" * 32},
+            "edit_sequence": 7}
+
+
+def test_shader_parameter_tool_schema_and_dispatch() -> None:
+    get_tool = _schema("get_shader_parameters")
+    set_tool = _schema("set_shader_parameter")
+    assert get_tool["inputSchema"]["additionalProperties"] is False
+    assert get_tool["annotations"]["readOnlyHint"] is True
+    assert set_tool["annotations"]["readOnlyHint"] is False
+    submit = {"operation": "submit", "client_request_id": "known_1",
+              "witness": _parameter_witness(), "parameter_id": "cellCount", "value": 44}
+    status = {"operation": "status", "client_request_id": "known_1"}
+    for args in (submit, status):
+        jsonschema.validate(args, set_tool["inputSchema"])
+    tagged = {**submit, "witness": {**submit["witness"], "base": {
+        "kind": "saved", "working_revision": 1,
+        "document_hash": submit["witness"]["base"]["document_hash"],
+        "source_hash": submit["witness"]["base"]["source_hash"]}}}
+    jsonschema.validate(tagged, set_tool["inputSchema"])
+    for args in ({**submit, "source": "secret"}, {**submit, "witness": {**submit["witness"], "edit_sequence": -1}},
+                 {**submit, "witness": {**submit["witness"], "source_epoch": 1}},
+                 {**status, "value": 44}, {**submit, "parameter_id": ""}):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(args, set_tool["inputSchema"])
+    client = mock.Mock()
+    client.get_shader_parameters.return_value = {"witness": _parameter_witness(), "parameters": []}
+    client.set_shader_parameter.return_value = {"status": "pending"}
+    server = HextileMcpServer(client=client)
+    assert server._get_shader_parameters({})["parameters"] == []
+    assert server._set_shader_parameter(submit)["status"] == "pending"
+    assert server._set_shader_parameter(status)["status"] == "pending"
+    client.set_shader_parameter.assert_any_call(submit)
+    client.set_shader_parameter.assert_any_call(status)
+
+
+def test_shader_parameter_client_transport_and_unknown_recovery() -> None:
+    witness = _parameter_witness()
+    submit = {"operation": "submit", "client_request_id": "known_1",
+              "witness": witness, "parameter_id": "cellCount", "value": 44}
+    status = {"operation": "status", "client_request_id": "known_1"}
+    ticket_id = "123e4567-e89b-42d3-a456-426614174000"
+    seen = []
+
+    class Response:
+        status = 200
+        def __init__(self, data: dict[str, Any]) -> None:
+            self.data = data
+        def read(self) -> bytes:
+            return json.dumps(self.data).encode()
+        def __enter__(self) -> "Response":
+            return self
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        seen.append(req)
+        if req.full_url.endswith("/api/agent/shader-parameters"):
+            return Response({"witness": witness, "writable": True, "parameters": [
+                {"id": "cellCount", "type": "integer", "value": 32, "default": 32, "ui": {"min": 1, "max": 64}}]})
+        if req.get_method() == "POST":
+            return Response({"ok": True, "ticket_id": ticket_id, "status": "pending"})
+        return Response({"ticket_id": ticket_id, "status": "applied", "parameter_id": "cellCount"})
+
+    client = Client(opener=opener)
+    assert client.get_shader_parameters()["parameters"][0]["value"] == 32
+    assert client.set_shader_parameter(submit)["status"] == "pending"
+    no_manifest = {**submit, "client_request_id": "known_2", "witness": {**witness, "base": {
+        key: val for key, val in witness["base"].items() if key != "manifest_hash"}}}
+    assert client.set_shader_parameter(no_manifest)["status"] == "pending"
+    assert client.set_shader_parameter(status)["status"] == "applied"
+    assert [req.get_method() for req in seen] == ["GET", "POST", "POST", "GET"]
+    assert seen[1].full_url.endswith("/api/agent/shader-parameter")
+    assert json.loads(seen[1].data) == {key: submit[key] for key in ("client_request_id", "witness", "parameter_id", "value")}
+    assert seen[3].full_url.endswith("/api/agent/shader-parameter/requests/known_1")
+    assert all(req.get_header("X-hextile-agent") == "mcp" for req in seen)
+
+    lost = Client(opener=lambda *_a, **_kw: (_ for _ in ()).throw(urllib.error.URLError(TimeoutError())))
+    with pytest.raises(HextileClientError) as uncertain:
+        lost.set_shader_parameter(submit)
+    assert uncertain.value.kind == "shader_parameter_outcome_unknown"
+    assert uncertain.value.receipt == {"client_request_id": "known_1"}
+    with mock.patch.object(client, "get_json", side_effect=HextileClientError("gone", kind="http", status_code=404)):
+        with pytest.raises(HextileClientError) as missing:
+            client.set_shader_parameter(status)
+    assert missing.value.kind == "shader_parameter_outcome_unknown"
+    with mock.patch.object(client, "post_json", side_effect=HextileClientError("stale_snapshot", kind="http", status_code=409)):
+        with pytest.raises(HextileClientError) as stale:
+            client.set_shader_parameter(submit)
+    assert stale.value.status_code == 409
+    assert stale.value.kind == "http"
+    for bad in ({**submit, "value": float("inf")}, {**submit, "witness": {**witness, "edit_sequence": True}},
+                {**submit, "witness": {**witness, "base": {"kind": "saved"}}},
+                {**status, "value": 44}):
+        with pytest.raises(HextileClientError):
+            client.set_shader_parameter(bad)
+
+
 def test_expression_timeline_mcp_schema_and_teaching() -> None:
     proposal = _proposal()
     proposal["modulation_edits"] = {"schema": 2, "edits": [

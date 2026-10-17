@@ -118,6 +118,8 @@ TOOL_NAMES = (
     "clone_spot",
     "get_spot_clone",
     "get_shader_context",
+    "get_shader_parameters",
+    "set_shader_parameter",
     "propose_shader",
     "control_shader_timeline",
     "preflight_shader_sequence",
@@ -172,6 +174,7 @@ _READ_ONLY = frozenset(
         "preflight_spot_clone",
         "get_spot_clone",
         "get_shader_context",
+        "get_shader_parameters",
         "preflight_shader_sequence",
         "get_shader_sequence",
         "preflight_shader_sequence_export",
@@ -218,6 +221,7 @@ _MUTATING = frozenset(
         "commit_layer_draft",
         "clone_spot",
         "propose_shader",
+        "set_shader_parameter",
         "control_shader_timeline",
         "render_shader_sequence",
         "control_shader_sequence",
@@ -1873,6 +1877,35 @@ TOOLS: list[dict[str, Any]] = [
         },
         required=["origin", "shader_id", "project_context_witness"],
     ),
+    _tool_def("get_shader_parameters",
+        "Read exposed controls on the mounted Shader without a source grant. Returns bounded IDs, labels, "
+        "types, current/default values, UI bounds and choices, plus an exact witness and writable state. "
+        "No GLSL, formula or help source is returned. MCP must be enabled; Follow may be off for this read.",
+        {}),
+    _tool_def("set_shader_parameter",
+        "Change one exposed control on the exact witnessed mounted Shader through Follow. "
+        "Submit a caller-known ID once; use operation=status with that same ID after an uncertain reply. "
+        "Runtime bounds and writability are authoritative. This needs MCP and Follow, not a source lease; "
+        "source proposals still need separate grants and human Apply.",
+        {"operation": {"enum": ["submit", "status"]},
+         "client_request_id": {"type": "string", "minLength": 1, "maxLength": 64,
+                               "pattern": r"^[A-Za-z0-9_-]+$"},
+         "witness": _shader_closed({
+             "studio_surface_id": _WORKSPACE_ID,
+             "project_context_witness": _WORKSPACE_WITNESS,
+             "shader": _SHADER_BASE_PROPERTIES["shader"],
+             "base": {"oneOf": [
+                 _shader_closed({"working_revision": {"type": "integer", "minimum": 1},
+                                 "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST,
+                                 "manifest_hash": {"oneOf": [_SHADER_DIGEST, {"type": "null"}]},
+                                }, ("manifest_hash",)),
+                 _shader_closed({"kind": {"const": "saved"}, "working_revision": {"type": "integer", "minimum": 1},
+                                 "document_hash": _SHADER_DIGEST, "source_hash": _SHADER_DIGEST}),
+                 _shader_closed({"kind": {"const": "unaccepted"}, "authoring_digest": _SHADER_DIGEST})]},
+             "edit_sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}),
+         "parameter_id": {"type": "string", "minLength": 1, "maxLength": 128},
+         "value": {"description": "JSON value matching the current exposed parameter descriptor."}},
+        required=["operation", "client_request_id"]),
     {"name": "propose_shader",
      "description": "POST one closed Shader proposal, including schema-2 parameter expression, mode and saved timeline edits, and return ticket identity. "
                     "APP alone checks grants and materializes IDs. Legacy proposals and every Board row must preserve Playable "
@@ -2016,6 +2049,13 @@ _timeline_tool["inputSchema"]["oneOf"] = [
     {"properties": {"operation": {"const": "submit"},
                     "action": {"enum": ["play", "pause", "reset"]}},
      "required": ["action", "witness"], "not": {"required": ["time_seconds"]}},
+]
+_parameter_tool = next(t for t in TOOLS if t["name"] == "set_shader_parameter")
+_parameter_tool["inputSchema"]["oneOf"] = [
+    {"properties": {"operation": {"const": "status"}},
+     "not": {"anyOf": [{"required": [key]} for key in ("witness", "parameter_id", "value")]}},
+    {"properties": {"operation": {"const": "submit"}},
+     "required": ["witness", "parameter_id", "value"]},
 ]
 assert {t["name"] for t in TOOLS} == set(TOOL_NAMES)
 assert _READ_ONLY | _MUTATING == set(TOOL_NAMES)
@@ -2247,6 +2287,8 @@ class HextileMcpServer:
             "clone_spot": self._clone_spot,
             "get_spot_clone": self._get_spot_clone,
             "get_shader_context": self._get_shader_context,
+            "get_shader_parameters": self._get_shader_parameters,
+            "set_shader_parameter": self._set_shader_parameter,
             "propose_shader": self._propose_shader,
             "control_shader_timeline": self._control_shader_timeline,
             "preflight_shader_sequence": self._preflight_shader_sequence,
@@ -2965,6 +3007,14 @@ class HextileMcpServer:
                 raise HextileClientError("Shader proposal cannot import, delete, or consume", kind="other")
         validate_shader_proposal(args)
         return self._shader_ticket_identity(self.client.propose_shader(args))
+
+    def _get_shader_parameters(self, args: dict[str, Any]) -> Any:
+        if args:
+            raise HextileClientError("Expected no Shader parameter discovery arguments", kind="other", status_code=422)
+        return self.client.get_shader_parameters()
+
+    def _set_shader_parameter(self, args: dict[str, Any]) -> Any:
+        return self.client.set_shader_parameter(args)
 
     def _control_shader_timeline(self, args: dict[str, Any]) -> Any:
         return self.client.control_shader_timeline(args)

@@ -883,6 +883,112 @@ class Client:
             },
         )
 
+    def get_shader_parameters(self) -> Any:
+        """Read only the mounted Shader's source-free exposed controls."""
+        return self.get_json("/api/agent/shader-parameters", headers={"X-Hextile-Agent": "mcp"})
+
+    def set_shader_parameter(self, args: Mapping[str, Any]) -> Any:
+        """Submit one witnessed value edit or reconcile its original request ID."""
+        request_id = args.get("client_request_id") if isinstance(args, Mapping) else None
+        if type(request_id) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request_id) is None:
+            raise HextileClientError("Invalid Shader parameter client_request_id", kind="other", status_code=422)
+        operation = args.get("operation")
+        if operation == "status":
+            if set(args) != {"operation", "client_request_id"}:
+                raise HextileClientError("Expected exact Shader parameter status arguments", kind="other", status_code=422)
+            try:
+                data = self.get_json(f"/api/agent/shader-parameter/requests/{request_id}",
+                                     headers={"X-Hextile-Agent": "mcp"})
+            except HextileClientError as exc:
+                if exc.status_code == 404:
+                    raise HextileClientError(
+                        f"Shader parameter outcome unknown for client_request_id={request_id}; absence is not refusal.",
+                        kind="shader_parameter_outcome_unknown", status_code=404,
+                        receipt={"client_request_id": request_id, "status": "unknown"}) from exc
+                raise
+            return self._shader_parameter_receipt(data, request_id, submit=False)
+        if operation != "submit" or set(args) != {"operation", "client_request_id", "witness", "parameter_id", "value"}:
+            raise HextileClientError("Expected exact Shader parameter submit arguments", kind="other", status_code=422)
+        witness = args["witness"]
+        if (type(witness) is not dict or set(witness) != {"studio_surface_id", "project_context_witness", "shader", "base", "edit_sequence"}
+                or type(witness["studio_surface_id"]) is not str or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", witness["studio_surface_id"])
+                or type(witness["project_context_witness"]) is not str or not 1 <= len(witness["project_context_witness"]) <= 256
+                or type(witness["edit_sequence"]) is not int or not 0 <= witness["edit_sequence"] <= 2**53 - 1
+                or type(witness["shader"]) is not dict or set(witness["shader"]) != {"origin", "shaderId"}
+                or witness["shader"]["origin"] not in {"builtin", "user", "project"}
+                or type(witness["shader"]["shaderId"]) is not str
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", witness["shader"]["shaderId"])):
+            raise HextileClientError("Invalid Shader parameter witness", kind="other", status_code=422)
+        base = witness["base"]
+        digest = lambda value: type(value) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+        if type(base) is not dict:
+            raise HextileClientError("Invalid Shader parameter base", kind="other", status_code=422)
+        if base.get("kind") == "unaccepted":
+            valid_base = set(base) == {"kind", "authoring_digest"} and digest(base["authoring_digest"])
+        else:
+            tagged = base.get("kind") == "saved"
+            required = {"working_revision", "document_hash", "source_hash"} | ({"kind"} if tagged else set())
+            valid_base = (required <= set(base) and set(base) <= (required | (set() if tagged else {"manifest_hash"}))
+                          and type(base["working_revision"]) is int and base["working_revision"] >= 1
+                          and digest(base["document_hash"]) and digest(base["source_hash"]))
+            if valid_base and "manifest_hash" in base:
+                valid_base = base["manifest_hash"] is None or digest(base["manifest_hash"])
+        if not valid_base:
+            raise HextileClientError("Invalid Shader parameter base", kind="other", status_code=422)
+        if type(args["parameter_id"]) is not str or not 1 <= len(args["parameter_id"]) <= 128:
+            raise HextileClientError("Invalid Shader parameter ID", kind="other", status_code=422)
+        def finite_json(value: Any, depth: int = 0) -> bool:
+            if depth > 8:
+                return False
+            if value is None or type(value) in (str, bool, int):
+                return True
+            if type(value) is float:
+                return math.isfinite(value)
+            if type(value) is list:
+                return len(value) <= 64 and all(finite_json(item, depth + 1) for item in value)
+            if type(value) is dict:
+                return len(value) <= 64 and all(type(key) is str and finite_json(item, depth + 1)
+                                                for key, item in value.items())
+            return False
+        value = args["value"]
+        if not finite_json(value) or len(json.dumps(value, allow_nan=False).encode("utf-8")) > 65536:
+            raise HextileClientError("Shader parameter value must be bounded finite JSON", kind="other", status_code=422)
+        body = {key: args[key] for key in ("client_request_id", "witness", "parameter_id", "value")}
+        try:
+            data = self.post_json("/api/agent/shader-parameter", body, headers={"X-Hextile-Agent": "mcp"})
+            return self._shader_parameter_receipt(data, request_id, submit=True)
+        except HextileClientError as exc:
+            if (exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500
+                    or exc.kind == "other" and exc.status_code is not None and 200 <= exc.status_code < 300):
+                raise HextileClientError(
+                    f"Shader parameter outcome unknown for client_request_id={request_id}; use status with this ID.",
+                    kind="shader_parameter_outcome_unknown", receipt={"client_request_id": request_id}) from exc
+            raise
+        except Exception as exc:
+            raise HextileClientError(
+                f"Shader parameter outcome unknown for client_request_id={request_id}; use status with this ID.",
+                kind="shader_parameter_outcome_unknown", receipt={"client_request_id": request_id}) from exc
+
+    @staticmethod
+    def _shader_parameter_receipt(data: Any, request_id: str, *, submit: bool) -> dict[str, Any]:
+        if (not isinstance(data, Mapping) or (submit and data.get("ok") is not True)
+                or "client_request_id" in data and data["client_request_id"] != request_id
+                or type(data.get("ticket_id")) is not str
+                or data.get("status") not in {"pending", "applied", "refused", "unknown"}):
+            raise HextileClientError("Invalid Shader parameter receipt", kind="other", status_code=200)
+        try:
+            if str(uuid.UUID(data["ticket_id"])) != data["ticket_id"]:
+                raise ValueError("noncanonical")
+        except (ValueError, AttributeError):
+            raise HextileClientError("Invalid Shader parameter receipt", kind="other", status_code=200) from None
+        result = {"client_request_id": request_id, "ticket_id": data["ticket_id"], "status": data["status"]}
+        for key in ("parameter_id", "reason"):
+            if key in data:
+                if type(data[key]) is not str or len(data[key]) > 128:
+                    raise HextileClientError("Invalid Shader parameter receipt", kind="other", status_code=200)
+                result[key] = data[key]
+        return result
+
     def propose_shader(self, body: Mapping[str, Any]) -> Any:
         """POST /api/agent/shader-proposals. Does not prepare, consume, import, or delete."""
         validate_shader_proposal(body)
