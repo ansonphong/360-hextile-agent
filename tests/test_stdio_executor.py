@@ -151,19 +151,36 @@ def test_mcp_activity_minilog_projects_only_confirmed_safe_facts() -> None:
     server._handlers["save_workflow"] = lambda _args: {"id": "new_workflow", "document": "secret-document"}
     server._handlers["get_shader_parameters"] = lambda _args: {
         "witness": {"shader": {"shaderId": "aurora"}}, "source": "secret-source"}
+    server._handlers["get_render_config"] = lambda _args: {"config": "secret-config"}
+    server._handlers["run_workflow"] = lambda _args: {"run_id": "run_2", "prompt": "secret-prompt"}
+    server._handlers["create_sequence"] = lambda _args: {"sequence_id": "seq_1", "source": "secret-source"}
+    server._handlers["start_batch"] = lambda _args: {"job_id": "batch_1", "prompt": "secret-prompt"}
 
     assert server.call_tool("get_status", {"run_id": "run_1"})["isError"] is False
     assert server.call_tool("set_shader_parameter", {"witness": {"shader": {"shaderId": "aurora"}},
                                                      "value": "secret-value"})["isError"] is False
     assert server.call_tool("save_workflow", {"id": "new_workflow", "document": {"prompt": "secret-prompt"}})["isError"] is False
     assert server.call_tool("get_shader_parameters", {})["isError"] is False
-    assert [row.get("outcome") for row in client.events if row["phase"] == "succeeded"] == [None, "pending", "saved", None]
+    assert server.call_tool("get_render_config", {"render_id": "render_1"})["isError"] is False
+    assert server.call_tool("run_workflow", {})["isError"] is False
+    assert server.call_tool("create_sequence", {})["isError"] is False
+    assert server.call_tool("start_batch", {})["isError"] is False
+    assert [row.get("outcome") for row in client.events if row["phase"] == "succeeded"] == [
+        None, "pending", "saved", None, None, None, None, None]
     assert client.events[0]["subject"] == {"kind": "run", "id": "run_1"}
     assert client.events[2]["subject"] == {"kind": "shader", "id": "aurora"}
     assert client.events[3]["ticket_id"] == "ticket_1"
     assert client.events[4]["subject"] == {"kind": "workflow", "id": "new_workflow"}
     assert client.events[6]["subject"] == {"kind": "shader"}
     assert client.events[7]["subject"] == {"kind": "shader", "id": "aurora"}
+    assert client.events[8]["subject"] == {"kind": "render", "id": "render_1"}
+    assert client.events[9]["subject"] == {"kind": "render", "id": "render_1"}
+    assert client.events[10]["subject"] == {"kind": "workflow"}
+    assert client.events[11]["subject"] == {"kind": "run", "id": "run_2"}
+    assert client.events[12]["subject"] == {"kind": "app"}
+    assert client.events[13]["subject"] == {"kind": "sequence", "id": "seq_1"}
+    assert client.events[14]["subject"] == {"kind": "app"}
+    assert client.events[15]["subject"] == {"kind": "batch", "id": "batch_1"}
     assert all(row["client_name"] == "Codex" for row in client.events)
     assert all("secret" not in json.dumps(row) and "private" not in json.dumps(row) for row in client.events)
 

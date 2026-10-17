@@ -2149,14 +2149,22 @@ def _activity_subject(name: str, args: Mapping[str, Any], payload: Any = None) -
         kind, value = "workspace", payload.get("handle")
     elif name in {"save_workflow", "delete_workflow", "get_workflow", "run_workflow"}:
         kind, value = "workflow", args.get("workflow_id") or args.get("id")
-    elif name in {"get_status", "get_render_config", "get_logs", "cancel_run", "retry_run"}:
+        if name == "run_workflow" and not value and isinstance(payload, Mapping) and payload.get("run_id"):
+            kind, value = "run", payload.get("run_id")
+    elif name == "get_render_config":
+        kind, value = "render", args.get("render_id")
+    elif name in {"get_status", "get_logs", "cancel_run", "retry_run"}:
         kind, value = "run", args.get("run_id")
     elif name in {"generate_seed", "get_seed_job", "cancel_seed"}:
         kind, value = "seed", args.get("request_id") if name == "generate_seed" else args.get("job_id")
     elif name in {"get_sequence", "start_sequence", "stop_sequence", "control_shader_sequence"}:
         kind, value = "sequence", args.get("sequence_id")
+    elif name == "create_sequence" and isinstance(payload, Mapping):
+        kind, value = "sequence", payload.get("sequence_id")
     elif name in {"get_batch", "get_batch_items", "pause_batch", "resume_batch", "cancel_batch", "retry_batch"}:
         kind, value = "batch", args.get("job_id")
+    elif name == "start_batch" and isinstance(payload, Mapping):
+        kind, value = "batch", payload.get("job_id")
     elif name.startswith("shader_") or "shader" in name:
         shader = args.get("shader")
         witness = args.get("witness")
