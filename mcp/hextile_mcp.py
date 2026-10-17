@@ -2160,6 +2160,8 @@ def _activity_subject(name: str, args: Mapping[str, Any], payload: Any = None) -
     elif name.startswith("shader_") or "shader" in name:
         shader = args.get("shader")
         witness = args.get("witness")
+        if name == "get_shader_parameters" and not isinstance(witness, Mapping) and isinstance(payload, Mapping):
+            witness = payload.get("witness")
         if not isinstance(shader, Mapping) and isinstance(witness, Mapping):
             shader = witness.get("shader")
         kind, value = "shader", shader.get("shaderId") if isinstance(shader, Mapping) else args.get("shader_id")
