@@ -2394,7 +2394,8 @@ class Client:
         for key in ("owner_id", "project_context_witness"):
             if type(surface.get(key)) is str and surface[key] and not cls._fractal_secret(surface[key]):
                 out[key] = surface[key]
-        targets = [item for item in surface.get("registry_targets", []) if type(item) is str and item][:64] if isinstance(surface.get("registry_targets"), list) else []
+        targets = [item for item in surface.get("registry_targets", [])
+                   if type(item) is str and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", item)][:1024] if isinstance(surface.get("registry_targets"), list) else []
         if targets:
             out["registry_targets"] = targets
         orphans = cls._fractal_pairs(surface.get("retained_orphans"))
@@ -2424,9 +2425,10 @@ class Client:
         for key in ("base", "effective"):
             numbers = surface.get(key)
             if isinstance(numbers, dict):
+                admitted = set(targets)
                 projected = {
                     name: value for name, value in numbers.items()
-                    if type(name) is str and type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(value)
+                    if name in admitted and type(value) in (int, float) and math.isfinite(value)
                 }
                 if projected:
                     out[key] = projected
@@ -2575,14 +2577,16 @@ class Client:
             if not isinstance(data, dict) or any(type(data.get(key)) is not int or data[key] < 0 for key in keys) or self._fractal_sha(data.get("render_identity")) is None:
                 raise HextileClientError("Invalid Fractal sequence preflight receipt", kind="other")
             return {key: data[key] for key in (*keys, "render_identity")}
-        if not isinstance(data, dict) or re.fullmatch(r"seq_[0-9a-f]{32}", str(data.get("sequence_id"))) is None:
+        known = self._fractal_sequence_identity(checked)
+        if (not isinstance(data, dict) or data.get("sequence_id") != known["sequence_id"]
+                or data.get("request_hash") != known["request_hash"]):
             raise HextileClientError("Fractal sequence acknowledgement unknown. Read the known sequence id; do not repost.",
                                      kind="fractal_sequence_outcome_unknown",
-                                     receipt={"status": "unknown", **self._fractal_sequence_identity(checked)})
-        receipt = {"sequence_id": data["sequence_id"]}
+                                     receipt={"status": "unknown", **known})
+        receipt = dict(known)
         if type(data.get("status")) is str:
             receipt["status"] = data["status"]
-        for key in ("request_hash", "recipe_hash"):
+        for key in ("recipe_hash",):
             if self._fractal_sha(data.get(key)):
                 receipt[key] = data[key]
         return receipt

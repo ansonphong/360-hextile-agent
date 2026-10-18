@@ -322,6 +322,52 @@ def test_context_projects_sha_orphans_and_drops_secrets() -> None:
     assert "glsl" not in blob
 
 
+def test_context_keeps_actual_targets_beyond_fixed_channels() -> None:
+    # animation_targets_v1.json has these 64 fixed channels before dynamic rows.
+    fixed = """
+        fractal.look.spread fractal.look.shift fractal.look.ambient fractal.look.fog_dist
+        fractal.look.exposure fractal.look.ao fractal.look.shadow_softness fractal.look.shaft_density
+        fractal.look.shaft_aniso fractal.look.pal_a.x fractal.look.pal_a.y fractal.look.pal_a.z
+        fractal.look.pal_b.x fractal.look.pal_b.y fractal.look.pal_b.z fractal.look.pal_c.x
+        fractal.look.pal_c.y fractal.look.pal_c.z fractal.look.pal_d.x fractal.look.pal_d.y
+        fractal.look.pal_d.z fractal.look.fog_color.x fractal.look.fog_color.y fractal.look.fog_color.z
+        fractal.look.bg_top.x fractal.look.bg_top.y fractal.look.bg_top.z fractal.look.bg_bottom.x
+        fractal.look.bg_bottom.y fractal.look.bg_bottom.z fractal.look.color.trap_weight
+        fractal.look.color.iter_weight fractal.look.color.radius_weight fractal.look.color.axis_weight
+        fractal.look.color.range_lo fractal.look.color.range_hi fractal.look.emission.strength
+        fractal.look.emission.center fractal.look.emission.width fractal.look.emission.color.x
+        fractal.look.emission.color.y fractal.look.emission.color.z fractal.look.glow.strength
+        fractal.look.glow.reach fractal.look.glow.center fractal.look.glow.width
+        fractal.look.glow.hue_offset fractal.look.glow.hue_bend fractal.look.glow.white_hot
+        fractal.look.glow.color.x fractal.look.glow.color.y fractal.look.glow.color.z
+        fractal.look.surface.rim_strength fractal.look.surface.rim_power fractal.look.surface.rim_color.x
+        fractal.look.surface.rim_color.y fractal.look.surface.rim_color.z fractal.camera.pos.x
+        fractal.camera.pos.y fractal.camera.pos.z fractal.camera.yaw fractal.camera.pitch
+        fractal.camera.roll fractal.camera.fov
+    """.split()
+    dynamic = ["fractal.formula.mandelbulb_power_n.power",
+               "fractal.hybrid.0.mandelbulb_power_n.power", "fractal.light.lt_c0ffee000001.az"]
+    assert len(fixed) == 64
+    targets = fixed + dynamic
+    values = {target: float(index) for index, target in enumerate(targets)}
+
+    def opener(req: Any, timeout: Any = None) -> _Response:
+        return _Response({"current_surface": {
+            "kind": "fractal_workshop", "scene_id": SCENE, "scene_revision": SHA,
+            "registry_targets": targets, "base": values, "effective": values,
+            "source": "private", "path": "/tmp/scene", "lease_id": "lease_secret",
+        }})
+
+    result = Client(opener=opener).get_fractal_context()
+    assert result["registry_targets"] == targets
+    for target in dynamic:
+        assert result["base"][target] == values[target]
+        assert result["effective"][target] == values[target]
+    assert "private" not in json.dumps(result)
+    assert "/tmp/scene" not in json.dumps(result)
+    assert "lease_secret" not in json.dumps(result)
+
+
 def test_integer_revision_is_omitted() -> None:
     def opener(req: Any, timeout: Any = None) -> _Response:
         surface = {
@@ -478,6 +524,36 @@ def test_sequence_resource_refusal_and_lost_render_do_not_mint() -> None:
     assert lost_exc.value.receipt["status"] == "unknown"
     assert lost_exc.value.receipt["sequence_id"] == "seq_" + __import__("hashlib").sha256(
         f"fractal-sequence/1\0{SCENE}\0job-1".encode()).hexdigest()[:32]
+
+
+def test_render_acknowledgement_binds_known_identity() -> None:
+    body = _sequence()
+    known = Client._fractal_sequence_identity(body)
+    posts: list[Any] = []
+
+    def success(req: Any, timeout: Any = None) -> _Response:
+        if req.get_method() == "POST" and req.full_url.endswith("/api/fractal/sequences"):
+            posts.append(req)
+        return _Response({**known, "status": "queued", "recipe_hash": SHA})
+
+    assert Client(opener=success).render_fractal_sequence(body) == {
+        **known, "status": "queued", "recipe_hash": SHA,
+    }
+    assert len(posts) == 1
+
+    for foreign in ({"sequence_id": SEQ}, {"request_hash": BASE}):
+        posts.clear()
+
+        def mismatch(req: Any, timeout: Any = None) -> _Response:
+            if req.get_method() == "POST" and req.full_url.endswith("/api/fractal/sequences"):
+                posts.append(req)
+            return _Response({**known, **foreign, "status": "queued"})
+
+        with pytest.raises(HextileClientError) as exc:
+            Client(opener=mismatch).render_fractal_sequence(body)
+        assert exc.value.kind == "fractal_sequence_outcome_unknown"
+        assert exc.value.receipt == {"status": "unknown", **known}
+        assert len(posts) == 1
 
 
 def test_known_sequence_404_stays_unknown() -> None:
