@@ -154,14 +154,15 @@ Install id stays **`360-hextile@360-hextile`**. Hosts do **not** auto-update.
 | `list_sequences` | `GET /api/sequences/` |
 | `stop_sequence` | `POST /api/sequences/{id}/stop` |
 
-Instruction surface: **`skills/360-hextile/SKILL.md`** (general automation hub), **`skills/shader/SKILL.md`** (authoritative Shader file procedure) and **`skills/upres/SKILL.md`**.
+Instruction surface: **`skills/360-hextile/SKILL.md`** (general automation hub), **`skills/shader/SKILL.md`** (authoritative Shader file procedure), **`skills/fractal/SKILL.md`** (Fractal Workshop) and **`skills/upres/SKILL.md`**.
 Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SKILL only.
+A temporary installer destination does not prove an installed host.
 
 ### Shader authoring in your coding host
 
 The `shader` skill edits the open Project Shader through the acknowledged `source.glsl` / `authoring.json` pair, registers a raw-byte framed digest and polls real APP Prepare/compiler receipts, with at most three repairs. Workshop Apply stays human. Installed MCP connectivity and native access to the same physical Project/worktree files are both required; a remote connector alone is insufficient. APP grants control disclosure/ingestion/Apply, not the host's filesystem permissions. Reasoning belongs to your host account/provider and may incur charges or quota limits.
 
-Claude prefixes plugin skills with the plugin name: `/360-hextile:360-hextile` (hub), `/360-hextile:shader`, `/360-hextile:upres`. Codex uses separately installed sibling skill directories (`360-hextile`, `shader`, `upres`): confirm all three in the installed picker. Check actual Codex/Grok invocation syntax on the installed client; source layout is not installed-host proof.
+Claude prefixes plugin skills with the plugin name: `/360-hextile:360-hextile` (hub), `/360-hextile:shader`, `/360-hextile:fractal`, `/360-hextile:upres`. Codex uses separately installed sibling skill directories (`360-hextile`, `shader`, `fractal`, `upres`): confirm them in the installed picker. Check actual Codex/Grok invocation syntax on the installed client; source layout does not prove an installed host.
 
 Open a clean Project Shader in Workshop, enable MCP Follow and whole-asset source_read/propose grants, then invoke the installed skill with your requested change. If open acknowledgement is unknown, preserve files and reconnect; never edit presumed paths. Timeout or exhausted repairs includes the last exact receipt and instructions to re-enter this same host skill. APP Retry rechecks a candidate; it cannot wake an idle coding host. Playable and input-adapter guidance is conditional on observed executable support, not merely document declarations. Neither compiler pass nor a preview certifies physical input behavior or saving.
 

@@ -143,7 +143,34 @@ EXPECTED_TOOLS = (
     "get_shader_update",
     "request_shader_doctor",
     "get_shader_doctor",
+    "get_fractal_context",
+    "apply_fractal_edits",
+    "control_fractal_timeline",
+    "open_fractal_scene",
+    "save_fractal_scene",
+    "get_fractal_request",
+    "preflight_fractal_sequence",
+    "render_fractal_sequence",
+    "get_fractal_sequence",
+    "control_fractal_sequence",
+    "preflight_fractal_sequence_export",
+    "export_fractal_sequence",
 )
+
+FRACTAL_CANONICAL_AHEAD = frozenset({
+    "get_fractal_context",
+    "apply_fractal_edits",
+    "control_fractal_timeline",
+    "open_fractal_scene",
+    "save_fractal_scene",
+    "get_fractal_request",
+    "preflight_fractal_sequence",
+    "render_fractal_sequence",
+    "get_fractal_sequence",
+    "control_fractal_sequence",
+    "preflight_fractal_sequence_export",
+    "export_fractal_sequence",
+})
 
 
 def test_tool_names_match_surface() -> None:
@@ -214,6 +241,15 @@ def test_open4_annotations_partition() -> None:
     assert "request_shader_doctor" not in _DESTRUCTIVE
     assert {"open_shader_workspace", "register_shader_update"} <= _MUTATING
     assert not {"open_shader_workspace", "register_shader_update"} & _DESTRUCTIVE
+    assert {
+        "get_fractal_context", "get_fractal_request",
+        "preflight_fractal_sequence", "get_fractal_sequence", "preflight_fractal_sequence_export",
+    } <= _READ_ONLY
+    assert {
+        "apply_fractal_edits", "control_fractal_timeline", "open_fractal_scene", "save_fractal_scene",
+        "render_fractal_sequence", "control_fractal_sequence", "export_fractal_sequence",
+    } <= _MUTATING
+    assert not FRACTAL_CANONICAL_AHEAD & _DESTRUCTIVE
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:
@@ -241,7 +277,10 @@ def test_app_tool_names_ast_equals() -> None:
     app_path = ROOT.parent / "360-HEXTILE-APP" / "backend" / "api" / "routes" / "agent_events.py"
     assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
     app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
-    assert set(TOOL_NAMES) == app_names
+    # T15.2 publishes these twelve names into APP with the bundle. Until then the
+    # canonical list is ahead and the APP inventory stays the pre-sync set.
+    assert set(TOOL_NAMES) - FRACTAL_CANONICAL_AHEAD == app_names
+    assert FRACTAL_CANONICAL_AHEAD.isdisjoint(app_names)
 
 
 def test_gpu_diagnostics_and_retry_client_routes() -> None:
@@ -844,7 +883,7 @@ def test_private_headers_are_request_local() -> None:
 
     assert seen[0]["x-hextile-copilot-token"] == "secret"
     assert seen[0]["x-hextile-op"] == "op-a"
-    assert "x-hextile-agent" not in seen[0]
+    assert seen[0]["x-hextile-agent"] == "mcp"
     assert "x-hextile-copilot-token" not in seen[1]
     assert "x-hextile-op" not in seen[1]
     assert seen[2]["x-hextile-agent"] == "mcp"

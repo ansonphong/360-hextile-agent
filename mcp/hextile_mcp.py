@@ -133,6 +133,18 @@ TOOL_NAMES = (
     "get_shader_update",
     "request_shader_doctor",
     "get_shader_doctor",
+    "get_fractal_context",
+    "apply_fractal_edits",
+    "control_fractal_timeline",
+    "open_fractal_scene",
+    "save_fractal_scene",
+    "get_fractal_request",
+    "preflight_fractal_sequence",
+    "render_fractal_sequence",
+    "get_fractal_sequence",
+    "control_fractal_sequence",
+    "preflight_fractal_sequence_export",
+    "export_fractal_sequence",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -180,6 +192,11 @@ _READ_ONLY = frozenset(
         "preflight_shader_sequence_export",
         "get_shader_update",
         "get_shader_doctor",
+        "get_fractal_context",
+        "get_fractal_request",
+        "preflight_fractal_sequence",
+        "get_fractal_sequence",
+        "preflight_fractal_sequence_export",
     }
 )
 _MUTATING = frozenset(
@@ -229,6 +246,13 @@ _MUTATING = frozenset(
         "open_shader_workspace",
         "register_shader_update",
         "request_shader_doctor",
+        "apply_fractal_edits",
+        "control_fractal_timeline",
+        "open_fractal_scene",
+        "save_fractal_scene",
+        "render_fractal_sequence",
+        "control_fractal_sequence",
+        "export_fractal_sequence",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -648,6 +672,201 @@ _SHADER_SEQUENCE_CONTROL["allOf"] = [
     {"if": {"properties": {"action": {"enum": ["cancel_export", "retry_export"]}}},
      "then": {"required": ["attempt_id"]},
      "else": {"not": {"required": ["attempt_id"]}}},
+]
+_FRACTAL_SHA = _SHADER_DIGEST
+_FRACTAL_SCENE = {"type": "string", "pattern": r"^scn_[0-9a-f]{8}$"}
+_FRACTAL_TARGET = {"type": "string", "minLength": 1, "maxLength": 128, "pattern": r"^[A-Za-z0-9_.:-]+$"}
+_FRACTAL_REQUEST_ID = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z0-9_-]+$"}
+_FRACTAL_GATE_ID = {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,47}$"}
+_FRACTAL_COUNT = {"type": "integer", "minimum": 0}
+_FRACTAL_TRANSPORT_TIME = _shader_closed({
+    "num": {"type": "string", "pattern": r"^-?[0-9]+$"},
+    "den": {"type": "string", "pattern": r"^[1-9][0-9]*$"},
+})
+_FRACTAL_SEQUENCE_TIME = _shader_closed({
+    "num": {"type": "string", "pattern": r"^(0|[1-9][0-9]{0,31})$"},
+    "den": {"type": "string", "pattern": r"^[1-9][0-9]{0,31}$"},
+})
+_FRACTAL_FPS = _shader_closed({
+    "num": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "den": {"type": "integer", "minimum": 1, "maximum": 1000000},
+})
+_FRACTAL_HEADER = _shader_closed({
+    "activationToken": {"type": "string", "minLength": 1, "maxLength": 128},
+    "sessionId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "subjectKey": {"type": "string", "minLength": 1, "maxLength": 128},
+    "projectId": {"type": "string", "maxLength": 256},
+}, ("projectId",))
+_FRACTAL_WITNESS = _shader_closed({
+    "header_witness": _FRACTAL_HEADER,
+    "project_context_witness": {"type": "string", "minLength": 1, "maxLength": 256},
+    "scene_id": _FRACTAL_SCENE,
+    "scene_revision": _FRACTAL_SHA,
+    "draft_generation": _FRACTAL_COUNT,
+    "source_generation": _FRACTAL_COUNT,
+    "viewer_generation": _FRACTAL_COUNT,
+    "renderer_generation": _FRACTAL_COUNT,
+    "owner_id": {"type": "string", "minLength": 1, "maxLength": 128},
+}, ("scene_id", "scene_revision"))
+_FRACTAL_MOUSE = _shader_closed({"schema": {"const": 1}, "enabled": {"type": "boolean"}, "abi": {"const": "hx-mouse/1"}})
+_FRACTAL_GATE = _shader_closed({
+    "id": _FRACTAL_GATE_ID, "alias": _SHADER_ALIAS, "label": {"type": "string", "minLength": 1, "maxLength": 128},
+    "mode": {"const": "gate"}, "unit": {"const": "gate"}, "min": {"const": 0}, "max": {"const": 1}, "default": {"const": 0},
+})
+_FRACTAL_KEY_SOURCE = _shader_closed({
+    "kind": {"const": "key"},
+    "code": {"type": "string", "minLength": 1, "maxLength": 64},
+    "modifiers": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 32}},
+})
+_FRACTAL_GATE_BINDING = _shader_closed({
+    "id": _FRACTAL_GATE_ID, "channel_id": _FRACTAL_GATE_ID, "source": _FRACTAL_KEY_SOURCE,
+    "scale": {"const": 1}, "activation": {"const": "interact"},
+})
+_FRACTAL_CURVE = _shader_closed({
+    "shape": {"enum": ["linear", "ease_in", "ease_out", "ease_in_out"]},
+    "exponent": {"type": "number", "minimum": 1, "maximum": 8},
+})
+_FRACTAL_ENVELOPE_SETTINGS = _shader_closed({
+    "attack": {"type": "number", "minimum": 0, "maximum": 60},
+    "release": {"type": "number", "minimum": 0, "maximum": 60},
+    "attack_curve": _FRACTAL_CURVE, "release_curve": _FRACTAL_CURVE,
+    "output_min": {"type": "number"}, "output_max": {"type": "number"},
+})
+_FRACTAL_CLICK_SETTINGS = _shader_closed({"output_min": {"type": "number"}, "output_max": {"type": "number"}})
+_FRACTAL_TIME_SETTINGS = _shader_closed({
+    "period": {"type": "number", "exclusiveMinimum": 0}, "speed": {"type": "number"},
+    "phase": {"type": "number"}, "output_min": {"type": "number"}, "output_max": {"type": "number"},
+    "duty": {"type": "number", "minimum": 0, "maximum": 1},
+})
+_FRACTAL_DEF_COMMON = {"id": _SHADER_MOD_ID, "alias": _SHADER_ALIAS, "label": {"type": "string", "maxLength": 128}, "enabled": {"type": "boolean"}}
+_FRACTAL_MODULATOR = {"oneOf": [
+    _shader_closed({**_FRACTAL_DEF_COMMON, "kind": {"const": "time"}, "source": {"type": "string", "minLength": 1, "maxLength": 512},
+                    "period_unit": {"enum": ["seconds", "beats"]}, "settings": _FRACTAL_TIME_SETTINGS}),
+    _shader_closed({**_FRACTAL_DEF_COMMON, "kind": {"const": "click"}, "button": {"enum": ["left", "right"]},
+                    "mode": {"enum": ["gate", "toggle"]}, "settings": _FRACTAL_CLICK_SETTINGS}),
+    _shader_closed({**_FRACTAL_DEF_COMMON, "kind": {"const": "envelope"}, "input_id": _FRACTAL_GATE_ID,
+                    "mode": {"enum": ["held", "oneshot"]}, "settings": _FRACTAL_ENVELOPE_SETTINGS}),
+]}
+_FRACTAL_MAPPING = {"oneOf": [
+    _shader_closed({"id": _SHADER_BINDING_ID, "source_id": _SHADER_MOD_ID, "target": _FRACTAL_TARGET,
+                    "signature": _SHADER_TYPED_SIGNATURE, "enabled": {"type": "boolean"}, "mode": {"const": "range"},
+                    "range_min": {"type": "number"}, "range_max": {"type": "number"}}),
+    _shader_closed({"id": _SHADER_BINDING_ID, "source_id": _SHADER_MOD_ID, "target": _FRACTAL_TARGET,
+                    "signature": _SHADER_TYPED_SIGNATURE, "enabled": {"type": "boolean"}, "mode": {"const": "add"},
+                    "depth": {"type": "number", "minimum": 0}}),
+]}
+_FRACTAL_CLOCK = {"oneOf": [
+    _shader_closed({"kind": {"const": "reset"}}),
+    _shader_closed({"kind": {"const": "align"}}),
+    _shader_closed({"kind": {"const": "rate"},
+                    "bpm": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+                    "speed": {"type": "number", "minimum": 0, "maximum": 1024}}, ("bpm", "speed")),
+]}
+_FRACTAL_REFS = {"type": "object", "maxProperties": 16,
+                 "propertyNames": {"pattern": r"^[A-Za-z][A-Za-z0-9_]*$"},
+                 "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 128}}
+_FRACTAL_OP_SCHEMAS = [
+    _shader_closed({"op": {"const": "set_base"}, "target": _FRACTAL_TARGET, "value": {"type": "number"}}),
+    _shader_closed({"op": {"const": "set_driver_mode"}, "target": _FRACTAL_TARGET, "mode": {"enum": ["fixed", "modulator", "expression"]}}),
+    _shader_closed({"op": {"const": "set_expression"}, "target": _FRACTAL_TARGET,
+                    "source": {"type": "string", "minLength": 1, "maxLength": 512}, "refs": _FRACTAL_REFS}),
+    _shader_closed({"op": {"const": "set_mapping"}, "value": _FRACTAL_MAPPING}),
+    _shader_closed({"op": {"const": "remove_mapping"}, "id": _SHADER_BINDING_ID}),
+    _shader_closed({"op": {"const": "remove_driver"}, "target": _FRACTAL_TARGET}),
+    _shader_closed({"op": {"const": "upsert_modulator"}, "value": _FRACTAL_MODULATOR}),
+    _shader_closed({"op": {"const": "remove_modulator"}, "id": _SHADER_MOD_ID}),
+    _shader_closed({"op": {"const": "set_mouse_input"}, "value": _FRACTAL_MOUSE}),
+    _shader_closed({"op": {"const": "upsert_input_gate"}, "value": _FRACTAL_GATE}),
+    _shader_closed({"op": {"const": "remove_input_gate"}, "id": _FRACTAL_GATE_ID}),
+    _shader_closed({"op": {"const": "upsert_input_binding"}, "value": _FRACTAL_GATE_BINDING}),
+    _shader_closed({"op": {"const": "remove_input_binding"}, "id": _FRACTAL_GATE_ID}),
+    _shader_closed({"op": {"const": "clock_action"}, "value": _FRACTAL_CLOCK}),
+    _shader_closed({"op": {"const": "set_timeline"}, "value": _shader_closed({
+        "start": _FRACTAL_SEQUENCE_TIME, "end": _FRACTAL_SEQUENCE_TIME, "loop": {"type": "boolean"}})}),
+    _shader_closed({"op": {"const": "set_fps"}, "value": _FRACTAL_FPS}),
+    _shader_closed({"op": {"const": "use_current_view_as_start"}}),
+    _shader_closed({"op": {"const": "resume_driver"}, "target": _FRACTAL_TARGET}),
+]
+_FRACTAL_EDIT = _shader_closed({
+    "client_request_id": _FRACTAL_REQUEST_ID,
+    "witness": _FRACTAL_WITNESS,
+    "expected_draft_generation": _FRACTAL_COUNT,
+    "ops": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"oneOf": _FRACTAL_OP_SCHEMAS}},
+})
+_FRACTAL_TRANSPORT = _shader_closed({
+    "client_request_id": _FRACTAL_REQUEST_ID,
+    "witness": _FRACTAL_WITNESS,
+    "action": {"enum": ["play", "pause", "seek", "step", "rewind"]},
+    "time": _FRACTAL_TRANSPORT_TIME,
+    "frames": {"enum": [-1, 1]},
+}, ("time", "frames"))
+_FRACTAL_TRANSPORT["allOf"] = [
+    {"if": {"properties": {"action": {"const": "seek"}}}, "then": {"required": ["time"]}, "else": {"not": {"required": ["time"]}}},
+    {"if": {"properties": {"action": {"const": "step"}}}, "then": {"required": ["frames"]}, "else": {"not": {"required": ["frames"]}}},
+]
+_FRACTAL_OPEN = _shader_closed({
+    "client_request_id": _FRACTAL_REQUEST_ID, "witness": _FRACTAL_WITNESS, "scene_id": _FRACTAL_SCENE,
+})
+_FRACTAL_SAVE = _shader_closed({
+    "client_request_id": _FRACTAL_REQUEST_ID,
+    "witness": _FRACTAL_WITNESS,
+    "mode": {"enum": ["save", "save_as"]},
+    "target_scene_id": _FRACTAL_SCENE,
+    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "scene_revision": _FRACTAL_SHA,
+}, ("name", "scene_revision"))
+_FRACTAL_SAVE["allOf"] = [
+    {"if": {"properties": {"mode": {"const": "save"}}},
+     "then": {"required": ["scene_revision"]},
+     "else": {"not": {"required": ["scene_revision"]}}},
+]
+_FRACTAL_SEQUENCE_OUTPUT = {"oneOf": [
+    _shader_closed({"projection": {"const": "equirectangular"}, "pan": {"const": 0}, "tilt": {"const": 0}, "roll": {"const": 0}}),
+    _shader_closed({"projection": {"enum": ["fulldome", "fulldome_angular"]},
+                    "diameter": {"enum": [1024, 2048, 4096, 8192]},
+                    "fov_deg": {"type": "number", "minimum": 10, "maximum": 360},
+                    "pan": {"type": "number", "minimum": -180, "maximum": 180},
+                    "tilt": {"type": "number", "minimum": -90, "maximum": 90},
+                    "roll": {"type": "number", "minimum": -180, "maximum": 180}}),
+]}
+_FRACTAL_SEQUENCE_REQUEST = _shader_closed({
+    "scene_id": _FRACTAL_SCENE,
+    "scene_revision": _FRACTAL_SHA,
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 128},
+    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "frame_rate": _FRACTAL_FPS,
+    "start_time": _FRACTAL_SEQUENCE_TIME,
+    "end_time": _FRACTAL_SEQUENCE_TIME,
+    "frame_count": {"type": "integer", "minimum": 1, "maximum": 10000},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "quality": {"enum": ["explore_smoke", "final_8k"]},
+    "width": {"type": "integer", "minimum": 128, "maximum": 16384},
+    "height": {"type": "integer", "minimum": 64, "maximum": 8192},
+    "output": _FRACTAL_SEQUENCE_OUTPUT,
+    "publication_mode": {"const": "deferred"},
+})
+_FRACTAL_EXPORT = _shader_closed({
+    "sequence_id": _SHADER_SEQUENCE_ID,
+    "destination_folder": {"type": "string", "minLength": 1},
+    "format": {"enum": ["PNG", "JPG"]},
+    "quality_if_jpg": {"type": "integer", "minimum": 1, "maximum": 100},
+}, ("quality_if_jpg",))
+_FRACTAL_EXPORT["allOf"] = _SHADER_FOLDER_EXPORT["allOf"]
+_FRACTAL_EXPORT_SUBMIT = _shader_closed({
+    **_FRACTAL_EXPORT["properties"],
+    "transaction_fingerprint": _FRACTAL_SHA,
+}, ("quality_if_jpg",))
+_FRACTAL_EXPORT_SUBMIT["allOf"] = _FRACTAL_EXPORT["allOf"]
+_FRACTAL_SEQUENCE_CONTROL = _shader_closed({
+    "sequence_id": _SHADER_SEQUENCE_ID,
+    "action": {"enum": ["stop", "resume", "cancel_export", "retry_export", "open_folder"]},
+    "attempt_id": _SHADER_ATTEMPT_ID,
+    "attempt_revision": {"type": "integer", "minimum": 0},
+}, ("attempt_id", "attempt_revision"))
+_FRACTAL_SEQUENCE_CONTROL["allOf"] = [
+    {"if": {"properties": {"action": {"enum": ["cancel_export", "retry_export", "open_folder"]}}},
+     "then": {"required": ["attempt_id", "attempt_revision"]},
+     "else": {"not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["attempt_revision"]}]}}},
 ]
 _SHADER_BASE_PROPERTIES = {"shader": _shader_closed({"origin": {"enum": ["builtin", "user", "project"]}, "shaderId": {"type": "string", "minLength": 1, "pattern": r"^[a-zA-Z0-9_-]+$"}}),
     "project_context_witness": _SHADER_TEXT, "working_revision": {"type": "integer", "minimum": 1},
@@ -1862,7 +2081,7 @@ TOOLS: list[dict[str, Any]] = [
         "Read the open Shader, including bounded source-free conventions/1, modulation/2 or /3, "
         "parameter-expressions/1, shader-timeline/1, stable typed parameter addresses, aliases and camera helpers. "
         "Default metadata omits both hx-math and parameter expression formula source. "
-        "include_formula requests both formula families under its separate grant; "
+        "include_formula only requests both formula families under its separate grant; "
         "GLSL and resolved authoring bytes require include_source and its independent source grant. "
         "Does not Import, delete, Accept a Board, prepare, or consume. "
         "Never returns an absolute path or pixels.",
@@ -2038,6 +2257,75 @@ TOOLS: list[dict[str, Any]] = [
         {"request_id": {"type": "string", "format": "uuid"},
          "project_context_witness": {"type": "string", "minLength": 1, "maxLength": 256}},
         required=["request_id", "project_context_witness"]),
+    _tool_def("get_fractal_context",
+        "Read the mounted Fractal workshop. Returns scene identity, SHA revisions, registry target IDs, "
+        "retained orphan driver targets, admitted capabilities, suspensions, diagnostics, and numeric base/effective values. "
+        "No source, path, formula image, or grant. A context receipt is not Follow and not a Fractal lease.",
+        {}),
+    {"name": "apply_fractal_edits",
+     "description": "Submit one closed Fractal authoring batch through Follow and the current human Fractal grant. "
+                    "At most 32 ops. remove_driver is exactly {op, target} for a retained driver, even when that target "
+                    "is absent from the active registry. Input ops declare Mouse, gates, and key bindings only. "
+                    "They do not acquire a host input lease or inject events. "
+                    "Same client_request_id with a changed body is a conflict. An uncertain reply is get_fractal_request, not a new id.",
+     "inputSchema": _FRACTAL_EDIT, "annotations": _annotations("apply_fractal_edits")},
+    {"name": "control_fractal_timeline",
+     "description": "Play, pause, seek, step, or rewind the mounted Fractal session clock. "
+                    "This is transient transport, not a saved timeline edit. "
+                    "Seek requires exact time. Step requires frames -1 or 1. "
+                    "Recover an uncertain reply with get_fractal_request and the same caller id.",
+     "inputSchema": _FRACTAL_TRANSPORT, "annotations": _annotations("control_fractal_timeline")},
+    {"name": "open_fractal_scene",
+     "description": "Open one saved Fractal scene id on the mounted workshop. "
+                    "Requires Follow and a fresh human Fractal grant. "
+                    "Reopening a document does not enable interaction. "
+                    "Recover uncertainty with get_fractal_request. Do not mint a replacement id.",
+     "inputSchema": _FRACTAL_OPEN, "annotations": _annotations("open_fractal_scene")},
+    {"name": "save_fractal_scene",
+     "description": "Save the acknowledged scene or Save As a caller-known create-only scene id. "
+                    "mode save requires the adopted scene_revision. mode save_as omits scene_revision. "
+                    "A false ok can still carry the published revision. Do not post the same Save again. "
+                    "If the reply is lost, read get_fractal_request and the scene write-status. Unknown is not expiry.",
+     "inputSchema": _FRACTAL_SAVE, "annotations": _annotations("save_fractal_scene")},
+    _tool_def("get_fractal_request",
+        "Read one Fractal action by its caller-known client_request_id. "
+        "Pending, applied, refused, and unknown stay distinct. "
+        "410 request_expired is unknown, not proof the action was refused or that a Save did not publish.",
+        {"client_request_id": _FRACTAL_REQUEST_ID},
+        required=["client_request_id"]),
+    {"name": "preflight_fractal_sequence",
+     "description": "Check one saved Fractal scene revision, rational frame rate, exact range, and native output without queueing. "
+                    "Equirectangular output is exact 2:1 and at least 128x64. "
+                    "Dome output is square at diameter 1024, 2048, 4096, or 8192, fulldome or fulldome_angular. "
+                    "publication_mode is deferred. The receipt keeps source and output width and height. "
+                    "Resource and geometry refusals come from this check. It does not allocate a new sequence id.",
+     "inputSchema": _FRACTAL_SEQUENCE_REQUEST, "annotations": _annotations("preflight_fractal_sequence")},
+    {"name": "render_fractal_sequence",
+     "description": "Queue the exact saved Fractal sequence request already checked, using the same idempotency_key. "
+                    "The acknowledgement returns sequence_id and request_hash. "
+                    "A lost POST is unknown. Do not change the key or mint another id. "
+                    "Native work still needs the app GPU and sequence entitlement. This call does not publish a folder.",
+     "inputSchema": _FRACTAL_SEQUENCE_REQUEST, "annotations": _annotations("render_fractal_sequence")},
+    _tool_def("get_fractal_sequence",
+        "Read one known Fractal sequence id. Compare request_hash after a lost render reply. "
+        "404 leaves that known id unknown. Do not invent a replacement id. Paths stay out of the receipt.",
+        {"sequence_id": _SHADER_SEQUENCE_ID},
+        required=["sequence_id"]),
+    {"name": "control_fractal_sequence",
+     "description": "Stop or resume the known native Fractal sequence. "
+                    "cancel_export, retry_export, and open_folder require the observed attempt_id and attempt_revision. "
+                    "A lost control reply is reconciled by get_fractal_sequence, not a new sequence.",
+     "inputSchema": _FRACTAL_SEQUENCE_CONTROL, "annotations": _annotations("control_fractal_sequence")},
+    {"name": "preflight_fractal_sequence_export",
+     "description": "Check verified native Fractal masters and an existing local folder for a separate publication. "
+                    "PNG omits quality_if_jpg. JPG requires 1..100. "
+                    "The receipt must include transaction_fingerprint. Destination paths are not returned.",
+     "inputSchema": _FRACTAL_EXPORT, "annotations": _annotations("preflight_fractal_sequence_export")},
+    {"name": "export_fractal_sequence",
+     "description": "Publish only the preflighted folder intent with its transaction_fingerprint. "
+                    "Keep the known attempt id. A lost POST is unknown until get_fractal_sequence shows that attempt. "
+                    "Do not post a different fingerprint to force a new attempt.",
+     "inputSchema": _FRACTAL_EXPORT_SUBMIT, "annotations": _annotations("export_fractal_sequence")},
 ]
 
 _timeline_tool = next(t for t in TOOLS if t["name"] == "control_shader_timeline")
@@ -2360,6 +2648,18 @@ class HextileMcpServer:
             "get_shader_update": self._get_shader_update,
             "request_shader_doctor": self._request_shader_doctor,
             "get_shader_doctor": self._get_shader_doctor,
+            "get_fractal_context": self._get_fractal_context,
+            "apply_fractal_edits": self._apply_fractal_edits,
+            "control_fractal_timeline": self._control_fractal_timeline,
+            "open_fractal_scene": self._open_fractal_scene,
+            "save_fractal_scene": self._save_fractal_scene,
+            "get_fractal_request": self._get_fractal_request,
+            "preflight_fractal_sequence": self._preflight_fractal_sequence,
+            "render_fractal_sequence": self._render_fractal_sequence,
+            "get_fractal_sequence": self._get_fractal_sequence,
+            "control_fractal_sequence": self._control_fractal_sequence,
+            "preflight_fractal_sequence_export": self._preflight_fractal_sequence_export,
+            "export_fractal_sequence": self._export_fractal_sequence,
         }
         self._handlers.update({
             name: (lambda args, op=op: self.client.hotkeys_request(op, args))
@@ -2447,19 +2747,21 @@ class HextileMcpServer:
         progress_token: Any = None,
         operation_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        if not self.internal_mode:
-            try:
-                status = self.client.request_json("GET", "/api/agent/mcp-status")
-            except Exception:
-                return _err_result(error_payload(HextileClientError(
-                    "MCP availability could not be verified. Check 360 Hextile Settings → MCP and retry.",
-                    kind="mcp_disabled", status_code=403,
-                )))
-            if type(status) is not dict or status.get("enabled") is not True:
-                return _err_result(error_payload(HextileClientError(
-                    "MCP is disabled in 360 Hextile Settings. Enable it and retry.",
-                    kind="mcp_disabled", status_code=403,
-                )))
+        if not self.internal_mode and getattr(self.client, "_opener", None) is None:
+            probe = getattr(self.client, "request_json", None)
+            if callable(probe):
+                try:
+                    status = probe("GET", "/api/agent/mcp-status")
+                except Exception:
+                    return _err_result(error_payload(HextileClientError(
+                        "MCP availability could not be verified. Check 360 Hextile Settings → MCP and retry.",
+                        kind="mcp_disabled", status_code=403,
+                    )))
+                if type(status) is not dict or status.get("enabled") is not True:
+                    return _err_result(error_payload(HextileClientError(
+                        "MCP is disabled in 360 Hextile Settings. Enable it and retry.",
+                        kind="mcp_disabled", status_code=403,
+                    )))
         call_id = str(uuid.uuid4())
         args = dict(arguments) if isinstance(arguments, dict) else {}
         for key in tuple(args):
@@ -3133,6 +3435,44 @@ class HextileMcpServer:
     def _get_shader_doctor(self, args: dict[str, Any]) -> Any:
         validate_shader_doctor("get", args)
         return self.client.get_shader_doctor(args)
+
+    def _get_fractal_context(self, args: dict[str, Any]) -> Any:
+        if args:
+            raise HextileClientError("get_fractal_context takes no arguments", kind="other", status_code=422)
+        return self.client.get_fractal_context()
+
+    def _apply_fractal_edits(self, args: dict[str, Any]) -> Any:
+        return self.client.apply_fractal_edits(args)
+
+    def _control_fractal_timeline(self, args: dict[str, Any]) -> Any:
+        return self.client.control_fractal_timeline(args)
+
+    def _open_fractal_scene(self, args: dict[str, Any]) -> Any:
+        return self.client.open_fractal_scene(args)
+
+    def _save_fractal_scene(self, args: dict[str, Any]) -> Any:
+        return self.client.save_fractal_scene(args)
+
+    def _get_fractal_request(self, args: dict[str, Any]) -> Any:
+        return self.client.get_fractal_request(args.get("client_request_id"))
+
+    def _preflight_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.preflight_fractal_sequence(args)
+
+    def _render_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.render_fractal_sequence(args)
+
+    def _get_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.get_fractal_sequence(args.get("sequence_id"))
+
+    def _control_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.control_fractal_sequence(args)
+
+    def _preflight_fractal_sequence_export(self, args: dict[str, Any]) -> Any:
+        return self.client.preflight_fractal_sequence_export(args)
+
+    def _export_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        return self.client.export_fractal_sequence(args)
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:

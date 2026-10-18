@@ -290,3 +290,34 @@ def test_fragment_tracks_legacy_hub_and_source_versions_agree(isolated_generated
     )
     assert INSTALL.PACKAGE_VERSION == manifest["version"] == server_version == "0.5.3"
     assert f"**v{INSTALL.PACKAGE_VERSION}**" in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_fractal_workshop_skill_lands_only_in_the_temp_home(tmp_path: Path) -> None:
+    """Temp-home discovery is not installed-host proof."""
+    assert INSTALL.main(["--home", str(tmp_path)]) == 0
+    installed = tmp_path / ".agents" / "skills" / "fractal" / "SKILL.md"
+    assert installed.is_file()
+    text = installed.read_text(encoding="utf-8")
+    source = (ROOT / "skills" / "fractal" / "SKILL.md").read_text(encoding="utf-8")
+    assert installed.read_bytes() == source.encode("utf-8")
+    for phrase in (
+        "get_fractal_context",
+        "apply_fractal_edits",
+        "remove_driver",
+        "input_gate_in_use",
+        "mouse_required",
+        "envelope_binding_required",
+        "save_as",
+        "128",
+        "2:1",
+        "transaction_fingerprint",
+        "does not prove an installed host",
+        "Interact",
+    ):
+        assert phrase in text
+    hub = (tmp_path / ".agents" / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
+    assert "installed **`fractal`**" in hub
+    assert "human Apply" in (tmp_path / ".agents" / "skills" / "shader" / "SKILL.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "skills/fractal/SKILL.md" in readme
+    assert "does not prove an installed host" in readme

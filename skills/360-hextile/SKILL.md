@@ -13,6 +13,8 @@ See `references/agent-lexicon.md` for locked words, the complementarity card, an
 
 For Project Shader coding, invoke the installed **`shader`** skill (`/360-hextile:shader` on Claude) using this host's observed syntax. It owns the acknowledged native-file procedure: negotiate v2 for the complete `workspace/` manifest or retain v1 for its two-file pair; edit only granted files, register the full raw digest, read APP diagnostics, repair/re-register, and leave review/**Apply** to the human. Read `get_guide` `best-practices`, `recipes`, `workflow-schema` and `website-index`, and the human page https://360hextile.com/docs/create/shader. A docs page, known schema, recognized `source-modules/1`, or source fixture does not prove installed shared-file access or executable support; observe APP `available`, executable capabilities and candidate `execution_ready`. Git CLI actions need a separate user instruction; MCP supplies no Git or auto-Apply tool. For **Playable Shaders** (`conventions/1`, `modulation/2`), one Enter-blast request authors the parameter, GLSL, logical gate, keyboard binding, BLAST envelope and Range mapping together. Control authoring never arms Interact, presses keys, changes live pose or writes Project presets. This hub remains the general Workflow automation entry.
 
+For Fractal Workshop, invoke the installed **`fractal`** skill. It owns fresh context, the human Fractal grant, closed edits, session transport, Save and Save As, and native sequence or folder publication. Shader Apply is unchanged.
+
 - Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
 - MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
 - MCP cannot `goto` or arm/operate an open Layers session (`REFUSE_NAV_MCP`, `REFUSE_LAYERS_MCP`).
@@ -135,6 +137,18 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_shader_update` | Read the exact workspace receipt with handle, change_id and acknowledged Project witness | no |
 | `request_shader_doctor` | Start one on-demand GPU Doctor pass for the clean, previewed Builtin, My Library or Project Shader with a capture grant; keep the UUID for polling | **yes** |
 | `get_shader_doctor` | Poll the exact Doctor request UUID and witness for bounded diagnostics without source, pixels or overlay mask | no |
+| `get_fractal_context` | Read the mounted Fractal workshop: SHA scene revision, registry targets, retained orphans, capabilities, and numeric base/effective values. Not a grant | no |
+| `apply_fractal_edits` | One closed batch of at most 32 authoring ops, including exact remove_driver `{op,target}`, under Follow and a fresh human Fractal grant | **yes** |
+| `control_fractal_timeline` | Play, pause, seek, step, or rewind the mounted session clock. Not a saved timeline write | **yes** |
+| `open_fractal_scene` | Open one saved scene id. Reopen does not enable interaction | **yes** |
+| `save_fractal_scene` | Save the adopted revision, or Save As a caller-known create-only id. Do not post again after ok false or a lost reply | **yes** |
+| `get_fractal_request` | Read one caller-known Fractal action. 410 is unknown, not refusal | no |
+| `preflight_fractal_sequence` | Check a saved revision, rational rate, exact range, and 2:1 or Dome geometry before any queue | no |
+| `render_fractal_sequence` | Queue that same deferred native request. A lost reply does not mint a new id | **yes** |
+| `get_fractal_sequence` | Read one known sequence id, including after a lost render or export reply | no |
+| `control_fractal_sequence` | Stop or resume native work, or cancel, retry, or open the current export attempt | **yes** |
+| `preflight_fractal_sequence_export` | Check a separate folder publication and keep its transaction_fingerprint | no |
+| `export_fractal_sequence` | Publish only that preflighted folder intent | **yes** |
 
 ### Selection guide
 

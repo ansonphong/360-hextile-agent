@@ -2115,6 +2115,562 @@ class Client:
                 "detail": str(exc),
             }
 
+    # ── Fractal workshop and native sequences ──────────────────────────
+
+    _FRACTAL_OP_FIELDS = {
+        "set_base": ("target", "value"),
+        "set_driver_mode": ("target", "mode"),
+        "set_expression": ("target", "source", "refs"),
+        "set_mapping": ("value",),
+        "remove_mapping": ("id",),
+        "remove_driver": ("target",),
+        "upsert_modulator": ("value",),
+        "remove_modulator": ("id",),
+        "set_mouse_input": ("value",),
+        "upsert_input_gate": ("value",),
+        "remove_input_gate": ("id",),
+        "upsert_input_binding": ("value",),
+        "remove_input_binding": ("id",),
+        "clock_action": ("value",),
+        "set_timeline": ("value",),
+        "set_fps": ("value",),
+        "use_current_view_as_start": (),
+        "resume_driver": ("target",),
+    }
+    _FRACTAL_KINDS = {"fractal_edit", "fractal_transport", "fractal_open", "fractal_save"}
+    _FRACTAL_AGENT = {"X-Hextile-Agent": "mcp"}
+
+    @staticmethod
+    def _fractal_code(exc: HextileClientError) -> Optional[str]:
+        try:
+            payload = json.loads(exc.body or "")
+        except (ValueError, TypeError):
+            return None
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        if isinstance(detail, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", detail):
+            return detail
+        if isinstance(detail, dict) and isinstance(detail.get("code"), str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", detail["code"]):
+            return detail["code"]
+        return None
+
+    @staticmethod
+    def _fractal_uncertain(exc: HextileClientError) -> bool:
+        return exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500 or exc.status_code == 410
+
+    def _fractal_forward(self, exc: HextileClientError) -> HextileClientError:
+        code = self._fractal_code(exc)
+        return HextileClientError(
+            "Fractal action refused", status_code=exc.status_code, kind=exc.kind,
+            receipt={"code": code} if code else None,
+        )
+
+    @staticmethod
+    def _fractal_sha(value: Any) -> Optional[str]:
+        if type(value) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+            return value
+        return None
+
+    @classmethod
+    def _fractal_witness(cls, value: Any) -> dict[str, Any]:
+        required = {
+            "header_witness", "project_context_witness", "draft_generation",
+            "source_generation", "viewer_generation", "renderer_generation", "owner_id",
+        }
+        if type(value) is not dict or not required <= set(value) <= required | {"scene_id", "scene_revision"}:
+            raise HextileClientError("Invalid Fractal witness", kind="other", status_code=422)
+        header = value["header_witness"]
+        header_required = {"activationToken", "sessionId", "subjectKey"}
+        if type(header) is not dict or not header_required <= set(header) <= header_required | {"projectId"}:
+            raise HextileClientError("Invalid Fractal witness", kind="other", status_code=422)
+        if any(type(header[key]) is not str or not header[key] for key in header_required):
+            raise HextileClientError("Invalid Fractal witness", kind="other", status_code=422)
+        if type(value["project_context_witness"]) is not str or not 1 <= len(value["project_context_witness"]) <= 256:
+            raise HextileClientError("Invalid Fractal witness", kind="other", status_code=422)
+        if type(value["owner_id"]) is not str or not 1 <= len(value["owner_id"]) <= 128:
+            raise HextileClientError("Invalid Fractal witness", kind="other", status_code=422)
+        for key in ("draft_generation", "source_generation", "viewer_generation", "renderer_generation"):
+            if type(value[key]) is not int or value[key] < 0:
+                raise HextileClientError("Invalid Fractal witness", kind="other", status_code=422)
+        if "scene_id" in value and re.fullmatch(r"scn_[0-9a-f]{8}", value["scene_id"]) is None:
+            raise HextileClientError("Invalid Fractal scene id", kind="other", status_code=422)
+        if "scene_revision" in value and cls._fractal_sha(value["scene_revision"]) is None:
+            raise HextileClientError("Invalid Fractal scene revision", kind="other", status_code=422)
+        return value
+
+    @classmethod
+    def _fractal_ops(cls, ops: Any) -> list[dict[str, Any]]:
+        if type(ops) is not list or not 1 <= len(ops) <= 32:
+            raise HextileClientError("Fractal edit batch must contain 1 to 32 ops", kind="other", status_code=422)
+        for op in ops:
+            fields = cls._FRACTAL_OP_FIELDS.get(op.get("op")) if type(op) is dict else None
+            if fields is None or set(op) != {"op", *fields}:
+                raise HextileClientError(
+                    "Fractal edit op is not closed", kind="other", status_code=422,
+                    receipt={"code": "invalid_animation"},
+                )
+            if "target" in op and (type(op["target"]) is not str or not op["target"]):
+                raise HextileClientError("Invalid Fractal target", kind="other", status_code=422)
+            if op["op"] == "set_mouse_input" and (
+                type(op["value"]) is not dict or set(op["value"]) != {"schema", "enabled", "abi"}
+                or op["value"].get("schema") != 1 or op["value"].get("abi") != "hx-mouse/1"
+                or type(op["value"].get("enabled")) is not bool
+            ):
+                raise HextileClientError("Invalid Fractal mouse declaration", kind="other", status_code=422)
+        return ops
+
+    def _fractal_request_id(self, value: Any) -> str:
+        if type(value) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) is None:
+            raise HextileClientError("Invalid Fractal client_request_id", kind="other", status_code=422)
+        return value
+
+    def _post_fractal_action(self, kind: str, args: Mapping[str, Any]) -> dict[str, Any]:
+        request_id = self._fractal_request_id(args.get("client_request_id") if isinstance(args, Mapping) else None)
+        witness = self._fractal_witness(args.get("witness") if isinstance(args, Mapping) else None)
+        body: dict[str, Any] = {"kind": kind, "client_request_id": request_id, "witness": witness}
+        if kind == "fractal_edit":
+            if set(args) != {"client_request_id", "witness", "expected_draft_generation", "ops"}:
+                raise HextileClientError("Fractal edit arguments are not closed", kind="other", status_code=422)
+            if args["expected_draft_generation"] != witness["draft_generation"] or type(args["expected_draft_generation"]) is not int:
+                raise HextileClientError("Fractal edit generation does not match the witness", kind="other", status_code=422)
+            body["expected_draft_generation"] = args["expected_draft_generation"]
+            body["ops"] = self._fractal_ops(args["ops"])
+        elif kind == "fractal_transport":
+            action = args.get("action")
+            allowed = {"client_request_id", "witness", "action"}
+            if action == "seek":
+                allowed.add("time")
+            elif action == "step":
+                allowed.add("frames")
+            elif action not in {"play", "pause", "rewind"}:
+                raise HextileClientError("Invalid Fractal transport action", kind="other", status_code=422)
+            if set(args) != allowed:
+                raise HextileClientError("Fractal transport arguments are not closed", kind="other", status_code=422)
+            body["action"] = action
+            if action == "seek":
+                body["time"] = args["time"]
+            if action == "step":
+                body["frames"] = args["frames"]
+        elif kind == "fractal_open":
+            if set(args) != {"client_request_id", "witness", "scene_id"} or re.fullmatch(r"scn_[0-9a-f]{8}", str(args.get("scene_id"))) is None:
+                raise HextileClientError("Fractal open arguments are not closed", kind="other", status_code=422)
+            body["scene_id"] = args["scene_id"]
+        else:
+            allowed = {"client_request_id", "witness", "mode", "target_scene_id"}
+            if not isinstance(args, Mapping) or not allowed <= set(args) <= allowed | {"name", "scene_revision"}:
+                raise HextileClientError("Fractal save arguments are not closed", kind="other", status_code=422)
+            if args["mode"] not in {"save", "save_as"} or re.fullmatch(r"scn_[0-9a-f]{8}", str(args.get("target_scene_id"))) is None:
+                raise HextileClientError("Invalid Fractal save target", kind="other", status_code=422)
+            if args["mode"] == "save" and self._fractal_sha(args.get("scene_revision")) is None:
+                raise HextileClientError("Save requires the adopted scene revision", kind="other", status_code=422)
+            if args["mode"] == "save_as" and "scene_revision" in args:
+                raise HextileClientError("Save As is create-only and takes no scene revision", kind="other", status_code=422)
+            body["mode"] = args["mode"]
+            body["target_scene_id"] = args["target_scene_id"]
+            if "name" in args:
+                body["name"] = args["name"]
+            if "scene_revision" in args:
+                body["scene_revision"] = args["scene_revision"]
+        try:
+            data = self.post_json("/api/agent/fractal-actions", body, headers=self._FRACTAL_AGENT)
+        except HextileClientError as exc:
+            if kind == "fractal_save" and self._fractal_uncertain(exc):
+                return self._reconcile_fractal_save(args)
+            if self._fractal_uncertain(exc):
+                raise HextileClientError(
+                    "Fractal action outcome unknown. Read get_fractal_request for this client_request_id. Unknown is not expiry or refusal.",
+                    status_code=exc.status_code, kind="fractal_outcome_unknown",
+                    receipt={"client_request_id": request_id, "status": "unknown"},
+                ) from exc
+            raise self._fractal_forward(exc) from exc
+        except Exception as exc:
+            if kind == "fractal_save":
+                return self._reconcile_fractal_save(args)
+            raise HextileClientError(
+                "Fractal action outcome unknown. Read get_fractal_request for this client_request_id.",
+                kind="fractal_outcome_unknown", receipt={"client_request_id": request_id, "status": "unknown"},
+            ) from exc
+        return self._fractal_action_receipt(data, request_id)
+
+    def _reconcile_fractal_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        request_id = str(args["client_request_id"])
+        target = str(args["target_scene_id"])
+        try:
+            data = self.get_json(
+                f"/api/agent/fractal-actions/requests/{urllib.parse.quote(request_id, safe='')}",
+                headers=self._FRACTAL_AGENT,
+            )
+            receipt = self._fractal_action_receipt(data, request_id)
+            if receipt.get("status") != "unknown" or receipt.get("result"):
+                return receipt
+        except HextileClientError:
+            pass
+        try:
+            written = self.get_json(
+                f"/api/fractal/scenes/{urllib.parse.quote(target, safe='')}/write-status/{urllib.parse.quote(request_id, safe='')}"
+            )
+        except HextileClientError as exc:
+            raise HextileClientError(
+                "Fractal Save outcome unknown. Unknown is not expiry and is not a reason to post again.",
+                status_code=exc.status_code, kind="fractal_outcome_unknown",
+                receipt={"client_request_id": request_id, "status": "unknown", "scene_id": target},
+            ) from exc
+        revision = self._fractal_sha(written.get("revision") if isinstance(written, dict) else None)
+        if isinstance(written, dict) and written.get("status") == "accepted" and revision:
+            return {
+                "client_request_id": request_id, "status": "applied", "kind": "fractal_save",
+                "result": {"scene_id": target, "client_request_id": request_id, "scene_revision": revision},
+            }
+        raise HextileClientError(
+            "Fractal Save outcome unknown. Unknown is not expiry and is not a reason to post again.",
+            kind="fractal_outcome_unknown",
+            receipt={"client_request_id": request_id, "status": "unknown", "scene_id": target},
+        )
+
+    def _fractal_action_receipt(self, data: Any, request_id: str) -> dict[str, Any]:
+        if not isinstance(data, dict) or data.get("status") not in {"pending", "applied", "refused", "unknown"}:
+            raise HextileClientError("Invalid Fractal action receipt", kind="other", status_code=200)
+        receipt: dict[str, Any] = {"client_request_id": request_id, "status": data["status"]}
+        if type(data.get("ok")) is bool:
+            receipt["ok"] = data["ok"]
+        if type(data.get("ticket_id")) is str:
+            receipt["ticket_id"] = data["ticket_id"]
+        if data.get("kind") in self._FRACTAL_KINDS:
+            receipt["kind"] = data["kind"]
+        if type(data.get("reason")) is str:
+            receipt["reason"] = data["reason"]
+        body = data.get("result")
+        if isinstance(body, dict):
+            projected: dict[str, Any] = {}
+            if type(body.get("scene_id")) is str:
+                projected["scene_id"] = body["scene_id"]
+            if type(body.get("client_request_id")) is str:
+                projected["client_request_id"] = body["client_request_id"]
+            for key in ("scene_revision", "base_scene_revision"):
+                revision = self._fractal_sha(body.get(key))
+                if revision:
+                    projected[key] = revision
+            if projected:
+                receipt["result"] = projected
+        return receipt
+
+    def get_fractal_context(self) -> dict[str, Any]:
+        data = self.get_json("/api/agent/live-context", params={"include_nav": 0, "include_active_tool": 0})
+        surface = data.get("current_surface") if isinstance(data, dict) else None
+        if not isinstance(surface, dict) or surface.get("kind") != "fractal_workshop":
+            raise HextileClientError(
+                "Fractal workshop is not mounted.", status_code=503, kind="http",
+                receipt={"code": "fractal_unavailable"},
+            )
+        return self._fractal_inspect(surface)
+
+    @classmethod
+    def _fractal_inspect(cls, surface: Mapping[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if type(surface.get("scene_id")) is str and re.fullmatch(r"scn_[0-9a-f]{8}", surface["scene_id"]):
+            out["scene_id"] = surface["scene_id"]
+        revision = cls._fractal_sha(surface.get("scene_revision"))
+        if revision:
+            out["scene_revision"] = revision
+        for key in ("draft_generation", "source_generation", "viewer_generation", "renderer_generation"):
+            if type(surface.get(key)) is int and surface[key] >= 0:
+                out[key] = surface[key]
+        for key in ("owner_id", "project_context_witness"):
+            if type(surface.get(key)) is str and surface[key] and not cls._fractal_secret(surface[key]):
+                out[key] = surface[key]
+        targets = [item for item in surface.get("registry_targets", []) if type(item) is str and item][:64] if isinstance(surface.get("registry_targets"), list) else []
+        if targets:
+            out["registry_targets"] = targets
+        orphans = cls._fractal_pairs(surface.get("retained_orphans"))
+        if orphans:
+            out["retained_orphans"] = orphans
+        if isinstance(surface.get("capabilities"), list):
+            tokens = [item for item in surface["capabilities"] if type(item) is str and re.fullmatch(r"[A-Za-z0-9_./+-]{1,64}", item)][:32]
+            if tokens:
+                out["capabilities"] = tokens
+        suspensions = cls._fractal_pairs(surface.get("suspensions"))
+        if suspensions:
+            out["suspensions"] = suspensions
+        if isinstance(surface.get("diagnostics"), list):
+            rows = []
+            for item in surface["diagnostics"][:32]:
+                if not isinstance(item, dict):
+                    continue
+                row = {}
+                if type(item.get("code")) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", item["code"]):
+                    row["code"] = item["code"]
+                if type(item.get("target")) is str and item["target"]:
+                    row["target"] = item["target"]
+                if row:
+                    rows.append(row)
+            if rows:
+                out["diagnostics"] = rows
+        for key in ("base", "effective"):
+            numbers = surface.get(key)
+            if isinstance(numbers, dict):
+                projected = {
+                    name: value for name, value in numbers.items()
+                    if type(name) is str and type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(value)
+                }
+                if projected:
+                    out[key] = projected
+        return out
+
+    @staticmethod
+    def _fractal_secret(value: str) -> bool:
+        return value.startswith("/") or "\\" in value or (len(value) >= 3 and value[1] == ":")
+
+    @classmethod
+    def _fractal_pairs(cls, value: Any) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        rows = []
+        for item in value[:32]:
+            if not isinstance(item, dict):
+                continue
+            target, reason = item.get("target"), item.get("reason")
+            if type(target) is str and target and type(reason) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason):
+                rows.append({"target": target, "reason": reason})
+        return rows
+
+    def apply_fractal_edits(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self._post_fractal_action("fractal_edit", args)
+
+    def control_fractal_timeline(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self._post_fractal_action("fractal_transport", args)
+
+    def open_fractal_scene(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self._post_fractal_action("fractal_open", args)
+
+    def save_fractal_scene(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self._post_fractal_action("fractal_save", args)
+
+    def get_fractal_request(self, client_request_id: str) -> dict[str, Any]:
+        request_id = self._fractal_request_id(client_request_id)
+        try:
+            data = self.get_json(
+                f"/api/agent/fractal-actions/requests/{urllib.parse.quote(request_id, safe='')}",
+                headers=self._FRACTAL_AGENT,
+            )
+        except HextileClientError as exc:
+            if exc.status_code == 410:
+                raise HextileClientError(
+                    "Fractal request outcome unknown. Expiry is not refusal and is not proof a Save was not published.",
+                    status_code=410, kind="fractal_outcome_unknown",
+                    receipt={"client_request_id": request_id, "status": "unknown"},
+                ) from exc
+            raise
+        return self._fractal_action_receipt(data, request_id)
+
+    def _fractal_sequence_body(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        required = {
+            "scene_id", "scene_revision", "idempotency_key", "name", "frame_rate",
+            "start_time", "end_time", "frame_count", "seed", "quality", "width", "height",
+            "output", "publication_mode",
+        }
+        if not isinstance(body, Mapping) or set(body) != required or body.get("publication_mode") != "deferred":
+            raise HextileClientError("Expected a closed deferred Fractal sequence request", kind="other", status_code=422)
+        if self._fractal_sha(body.get("scene_revision")) is None or re.fullmatch(r"scn_[0-9a-f]{8}", str(body.get("scene_id"))) is None:
+            raise HextileClientError("Invalid saved Fractal scene identity", kind="other", status_code=422)
+        output = body["output"]
+        width, height = body["width"], body["height"]
+        if type(width) is not int or type(height) is not int or not isinstance(output, dict):
+            raise HextileClientError("Invalid Fractal sequence geometry", kind="other", status_code=422, receipt={"code": "geometry"})
+        projection = output.get("projection")
+        if projection == "equirectangular":
+            if not (height >= 64 and width >= 128 and height % 2 == 0 and width == 2 * height):
+                raise HextileClientError(
+                    "Fractal equirectangular output requires exact 2:1 and at least 128x64",
+                    kind="other", status_code=422, receipt={"code": "geometry"},
+                )
+        elif projection in {"fulldome", "fulldome_angular"}:
+            if output.get("diameter") not in {1024, 2048, 4096, 8192} or width != height or width != output["diameter"]:
+                raise HextileClientError(
+                    "Fractal Dome output must be square at diameter 1024, 2048, 4096, or 8192",
+                    kind="other", status_code=422, receipt={"code": "geometry"},
+                )
+        else:
+            raise HextileClientError("Invalid Fractal sequence projection", kind="other", status_code=422, receipt={"code": "geometry"})
+        return dict(body)
+
+    def _fractal_sequence_error(self, exc: HextileClientError, *, uncertain: bool) -> HextileClientError:
+        code = self._fractal_code(exc)
+        if uncertain and self._fractal_uncertain(exc):
+            return HextileClientError(
+                "Fractal sequence POST outcome unknown. GET the acknowledged sequence id and compare request_hash. Do not mint another id.",
+                status_code=exc.status_code, kind="fractal_sequence_outcome_unknown",
+                receipt={"status": "unknown"},
+            )
+        return HextileClientError(
+            "Fractal sequence refused", status_code=exc.status_code, kind=exc.kind,
+            receipt={"code": code} if code else None,
+        )
+
+    def _fractal_sequence_post(self, body: Mapping[str, Any], *, preflight: bool) -> dict[str, Any]:
+        checked = self._fractal_sequence_body(body)
+        path = "/api/fractal/sequences/preflight" if preflight else "/api/fractal/sequences"
+        try:
+            data = self.post_json(path, checked)
+        except HextileClientError as exc:
+            raise self._fractal_sequence_error(exc, uncertain=not preflight) from exc
+        except Exception as exc:
+            safe = HextileClientError("Fractal sequence transport failed", kind="app_down")
+            raise self._fractal_sequence_error(safe, uncertain=not preflight) from exc
+        if preflight:
+            keys = ("frame_count", "source_width", "source_height", "output_width", "output_height")
+            if not isinstance(data, dict) or any(type(data.get(key)) is not int or data[key] < 0 for key in keys) or self._fractal_sha(data.get("render_identity")) is None:
+                raise HextileClientError("Invalid Fractal sequence preflight receipt", kind="other")
+            return {key: data[key] for key in (*keys, "render_identity")}
+        if not isinstance(data, dict) or re.fullmatch(r"seq_[0-9a-f]{32}", str(data.get("sequence_id"))) is None:
+            raise HextileClientError("Invalid Fractal sequence receipt", kind="other")
+        receipt = {"sequence_id": data["sequence_id"]}
+        if type(data.get("status")) is str:
+            receipt["status"] = data["status"]
+        for key in ("request_hash", "recipe_hash"):
+            if self._fractal_sha(data.get(key)):
+                receipt[key] = data[key]
+        return receipt
+
+    def preflight_fractal_sequence(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        return self._fractal_sequence_post(body, preflight=True)
+
+    def render_fractal_sequence(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        return self._fractal_sequence_post(body, preflight=False)
+
+    def get_fractal_sequence(self, sequence_id: str) -> dict[str, Any]:
+        if type(sequence_id) is not str or re.fullmatch(r"seq_[0-9a-f]{32}", sequence_id) is None:
+            raise HextileClientError("Expected a known Fractal sequence id", kind="other", status_code=422)
+        try:
+            data = self.get_json(f"/api/fractal/sequences/{sequence_id}")
+        except HextileClientError as exc:
+            if exc.status_code == 404:
+                raise HextileClientError(
+                    "Known Fractal sequence id is absent. An uncertain render POST remains unknown. Do not mint another id.",
+                    status_code=404, kind="fractal_sequence_outcome_unknown",
+                    receipt={"sequence_id": sequence_id, "status": "unknown"},
+                ) from exc
+            raise self._fractal_sequence_error(exc, uncertain=False) from exc
+        if not isinstance(data, dict) or data.get("sequence_id") != sequence_id:
+            raise HextileClientError("Invalid Fractal sequence status", kind="other")
+        receipt: dict[str, Any] = {"sequence_id": sequence_id}
+        if type(data.get("status")) is str:
+            receipt["status"] = data["status"]
+        for key in ("request_hash", "recipe_hash", "render_identity"):
+            if self._fractal_sha(data.get(key)):
+                receipt[key] = data[key]
+        for key in ("source_width", "source_height", "output_width", "output_height", "frame_count", "width", "height"):
+            if type(data.get(key)) is int and data[key] >= 0:
+                receipt[key] = data[key]
+        output = data.get("output")
+        if isinstance(output, dict) and output.get("projection") in {"equirectangular", "fulldome", "fulldome_angular"}:
+            projected = {"projection": output["projection"]}
+            for key in ("diameter", "fov_deg", "pan", "tilt", "roll"):
+                value = output.get(key)
+                if type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(value):
+                    projected[key] = value
+            receipt["output"] = projected
+        return receipt
+
+    def _fractal_export_args(self, args: Mapping[str, Any], *, submit: bool) -> tuple[str, dict[str, Any]]:
+        required = {"sequence_id", "destination_folder", "format"}
+        if submit:
+            required.add("transaction_fingerprint")
+        if not isinstance(args, Mapping) or not required <= set(args) <= required | {"quality_if_jpg"}:
+            raise HextileClientError("Expected a closed Fractal folder export", kind="other", status_code=422)
+        sequence_id = args["sequence_id"]
+        if type(sequence_id) is not str or re.fullmatch(r"seq_[0-9a-f]{32}", sequence_id) is None:
+            raise HextileClientError("Expected a known Fractal sequence id", kind="other", status_code=422)
+        encoding = args["format"]
+        quality = args.get("quality_if_jpg")
+        if encoding not in {"PNG", "JPG"} or (encoding == "JPG") != (type(quality) is int and 1 <= quality <= 100):
+            raise HextileClientError("Invalid Fractal folder encoding", kind="other", status_code=422)
+        if encoding == "PNG" and "quality_if_jpg" in args:
+            raise HextileClientError("PNG export omits quality_if_jpg", kind="other", status_code=422)
+        body = {"destination_folder": args["destination_folder"], "format": encoding}
+        if quality is not None:
+            body["quality_if_jpg"] = quality
+        if submit:
+            if self._fractal_sha(args.get("transaction_fingerprint")) is None:
+                raise HextileClientError("Export requires the preflight transaction_fingerprint", kind="other", status_code=422)
+            body["transaction_fingerprint"] = args["transaction_fingerprint"]
+        return sequence_id, body
+
+    def _fractal_export_receipt(self, data: Any, sequence_id: str) -> dict[str, Any]:
+        if not isinstance(data, dict) or data.get("sequence_id") != sequence_id or self._fractal_sha(data.get("transaction_fingerprint")) is None:
+            raise HextileClientError("Invalid Fractal export receipt", kind="other")
+        receipt = {
+            "sequence_id": sequence_id,
+            "transaction_fingerprint": data["transaction_fingerprint"],
+        }
+        if type(data.get("attempt_id")) is str and re.fullmatch(r"attempt_[0-9a-f]{32}", data["attempt_id"]):
+            receipt["attempt_id"] = data["attempt_id"]
+        if type(data.get("status")) is str:
+            receipt["status"] = data["status"]
+        if self._fractal_sha(data.get("recipe_hash")):
+            receipt["recipe_hash"] = data["recipe_hash"]
+        return receipt
+
+    def preflight_fractal_sequence_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        sequence_id, body = self._fractal_export_args(args, submit=False)
+        try:
+            data = self.post_json(f"/api/fractal/sequences/{sequence_id}/export/preflight", body)
+        except HextileClientError as exc:
+            raise self._fractal_sequence_error(exc, uncertain=False) from exc
+        return self._fractal_export_receipt(data, sequence_id)
+
+    def export_fractal_sequence(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        sequence_id, body = self._fractal_export_args(args, submit=True)
+        try:
+            data = self.post_json(f"/api/fractal/sequences/{sequence_id}/export", body)
+        except HextileClientError as exc:
+            if self._fractal_uncertain(exc):
+                raise HextileClientError(
+                    "Fractal export POST outcome unknown. GET the known sequence and attempt. Do not post again.",
+                    status_code=exc.status_code, kind="fractal_sequence_outcome_unknown",
+                    receipt={"status": "unknown", "sequence_id": sequence_id},
+                ) from exc
+            raise self._fractal_sequence_error(exc, uncertain=False) from exc
+        receipt = self._fractal_export_receipt(data, sequence_id)
+        if receipt["transaction_fingerprint"] != body["transaction_fingerprint"]:
+            raise HextileClientError("Invalid Fractal export acknowledgement", kind="other")
+        return receipt
+
+    def control_fractal_sequence(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(args, Mapping) or "sequence_id" not in args or "action" not in args:
+            raise HextileClientError("Expected closed Fractal sequence control", kind="other", status_code=422)
+        sequence_id, action = args["sequence_id"], args["action"]
+        if type(sequence_id) is not str or re.fullmatch(r"seq_[0-9a-f]{32}", sequence_id) is None:
+            raise HextileClientError("Expected a known Fractal sequence id", kind="other", status_code=422)
+        publication = action in {"cancel_export", "retry_export", "open_folder"}
+        if action in {"stop", "resume"}:
+            if set(args) != {"sequence_id", "action"}:
+                raise HextileClientError("Native Fractal control takes no attempt", kind="other", status_code=422)
+            suffix, body = action, None
+        elif publication:
+            if set(args) != {"sequence_id", "action", "attempt_id", "attempt_revision"}:
+                raise HextileClientError("Publication control requires the observed attempt id and revision", kind="other", status_code=422)
+            if type(args["attempt_id"]) is not str or re.fullmatch(r"attempt_[0-9a-f]{32}", args["attempt_id"]) is None or type(args["attempt_revision"]) is not int:
+                raise HextileClientError("Invalid Fractal export attempt", kind="other", status_code=422)
+            suffix = {"cancel_export": "export/cancel", "retry_export": "export/retry", "open_folder": "export/open-folder"}[action]
+            body = {"attempt_id": args["attempt_id"], "attempt_revision": args["attempt_revision"]}
+        else:
+            raise HextileClientError("Invalid Fractal sequence control", kind="other", status_code=422)
+        try:
+            data = self.post_json(f"/api/fractal/sequences/{sequence_id}/{suffix}", body)
+        except HextileClientError as exc:
+            if self._fractal_uncertain(exc):
+                raise HextileClientError(
+                    "Fractal control POST outcome unknown. GET the known sequence before another action.",
+                    status_code=exc.status_code, kind="fractal_sequence_outcome_unknown",
+                    receipt={"status": "unknown", "sequence_id": sequence_id},
+                ) from exc
+            raise self._fractal_sequence_error(exc, uncertain=False) from exc
+        receipt = {"sequence_id": sequence_id, "action": action}
+        if isinstance(data, dict) and type(data.get("status")) is str:
+            receipt["status"] = data["status"]
+        if publication and type(args.get("attempt_id")) is str:
+            receipt["attempt_id"] = args["attempt_id"]
+        return receipt
+
     # ── internals ───────────────────────────────────────────────────────
 
     def _url(self, path: str) -> str:

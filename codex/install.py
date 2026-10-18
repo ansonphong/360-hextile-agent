@@ -4,6 +4,7 @@
 Writes:
   ~/.agents/skills/360-hextile/SKILL.md + references/  (marker .hextile-agent-marker)
   ~/.agents/skills/shader/SKILL.md
+  ~/.agents/skills/fractal/SKILL.md
   ~/.agents/skills/upres/SKILL.md
   [mcp_servers.hextile] into ~/.codex/config.toml  (stdio only)
 
@@ -27,7 +28,7 @@ from pathlib import Path
 PACKAGE_VERSION = "0.5.3"
 MIN_CODEX = "0.34.0"
 MARKER_NAME = ".hextile-agent-marker"
-SKILL_NAMES = ("360-hextile", "shader", "upres")
+SKILL_NAMES = ("360-hextile", "shader", "fractal", "upres")
 MCP_SECTION = "mcp_servers.hextile"
 BEGIN_MARK = "# >>> hextile-agent begin (do not edit between markers)"
 END_MARK = "# <<< hextile-agent end"
