@@ -2551,6 +2551,16 @@ class Client:
     def _fractal_sequence_identity(body: Mapping[str, Any]) -> dict[str, str]:
         # APP FractalSequenceRequest.model_dump includes its default folder_export.
         request = {**body, "folder_export": None}
+        output = body["output"]
+        if output["projection"] in {"fulldome", "fulldome_angular"}:
+            normalized = dict(output)
+            for key in ("fov_deg", "pan", "tilt", "roll"):
+                if key in normalized:
+                    value = float(normalized[key])
+                    normalized[key] = 0.0 if key != "fov_deg" and value == 0 else value
+            request["output"] = normalized
+        else:
+            request["output"] = {**output, "pan": 0, "tilt": 0, "roll": 0}
         encoded = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
         identity = f"fractal-sequence/1\0{body['scene_id']}\0{body['idempotency_key']}".encode()
         return {"sequence_id": "seq_" + hashlib.sha256(identity).hexdigest()[:32],

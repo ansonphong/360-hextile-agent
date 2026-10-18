@@ -556,6 +556,53 @@ def test_render_acknowledgement_binds_known_identity() -> None:
         assert len(posts) == 1
 
 
+@pytest.mark.parametrize("projection,request_hash", [
+    ("equirectangular", "sha256:2907f281420f3e7af28671d7dd21a89cd3f59d5d5b5d176b220840613a3770b1"),
+    ("fulldome", "sha256:b721370b1d964bcd59f94279d4725a83f144933bea708c55837352121069ecad"),
+    ("fulldome_angular", "sha256:19f688554abe0960bf905fc0ead4ff1553f18204ec94634d583bcb17792c71d6"),
+])
+def test_render_identity_matches_app_model_dump_for_native_outputs(projection: str, request_hash: str) -> None:
+    # Oracle hashes come from APP FractalSequenceRequest.model_validate(body).model_dump(mode="json")
+    # in the APP Windows runtime, serialized with sequence_samples._digest's JSON settings.
+    output = ({"projection": "equirectangular", "pan": 0, "tilt": 0, "roll": 0}
+              if projection == "equirectangular" else
+              {"projection": projection, "diameter": 1024, "fov_deg": 180,
+               "pan": -0.0, "tilt": 0, "roll": 0})
+    size = 128 if projection == "equirectangular" else 1024
+    body = _sequence(width=size, height=size // 2 if projection == "equirectangular" else size,
+                     output=output)
+    sequence_id = "seq_" + __import__("hashlib").sha256(
+        f"fractal-sequence/1\0{SCENE}\0job-1".encode()).hexdigest()[:32]
+    expected = {"sequence_id": sequence_id, "request_hash": request_hash}
+    assert Client._fractal_sequence_identity(body) == expected
+    posts: list[Any] = []
+
+    def accepted(req: Any, timeout: Any = None) -> _Response:
+        if req.get_method() == "POST" and req.full_url.endswith("/api/fractal/sequences"):
+            posts.append(req)
+        return _Response({**expected, "status": "queued"}, status=202)
+
+    assert Client(opener=accepted).render_fractal_sequence(body) == {**expected, "status": "queued"}
+    assert len(posts) == 1
+    posts.clear()
+
+    def lost_then_status(req: Any, timeout: Any = None) -> _Response:
+        if req.get_method() == "POST" and req.full_url.endswith("/api/fractal/sequences"):
+            posts.append(req)
+            raise urllib.error.URLError(TimeoutError())
+        assert req.get_method() == "GET"
+        assert req.full_url.endswith("/api/fractal/sequences/" + sequence_id)
+        return _Response({**expected, "status": "queued"})
+
+    client = Client(opener=lost_then_status)
+    with pytest.raises(HextileClientError) as exc:
+        client.render_fractal_sequence(body)
+    assert exc.value.kind == "fractal_sequence_outcome_unknown"
+    assert exc.value.receipt == {"status": "unknown", **expected}
+    assert client.get_fractal_sequence(sequence_id) == {**expected, "status": "queued"}
+    assert len(posts) == 1
+
+
 def test_known_sequence_404_stays_unknown() -> None:
     def opener(req: Any, timeout: Any = None) -> _Response:
         assert req.full_url.endswith(f"/api/fractal/sequences/{SEQ}")
