@@ -265,14 +265,6 @@ def test_input_repair_is_one_atomic_batch() -> None:
         {"op": "remove_modulator", "id": click},
         {"op": "set_mouse_input", "value": {"schema": 1, "enabled": False, "abi": "hx-mouse/1"}},
         {"op": "remove_input_binding", "id": "fire_key"},
-        {"op": "upsert_modulator", "value": {
-            "id": MOD, "alias": "Blast", "label": "Blast", "kind": "envelope", "enabled": False,
-            "input_id": "fire", "mode": "oneshot",
-            "settings": {"attack": 0.02, "release": 0.4,
-                         "attack_curve": {"shape": "linear", "exponent": 1},
-                         "release_curve": {"shape": "ease_out", "exponent": 2},
-                         "output_min": 0, "output_max": 1},
-        }},
         {"op": "remove_input_gate", "id": "fire"},
     ]
 
@@ -311,7 +303,7 @@ def test_context_projects_sha_orphans_and_drops_secrets() -> None:
             "diagnostics": [{"code": "cycle", "target": "fractal.camera.yaw"}],
             "base": {"fractal.camera.yaw": 0.5, "note": "secret"},
             "effective": {"fractal.camera.yaw": 1},
-            "header_witness": {"activationToken": "secret-token"},
+            "header_witness": {"activationToken": "tok", "sessionId": "ses", "subjectKey": "sub"},
             "source": "glsl",
             "path": "/tmp/scene",
             "lease_id": "lease_secret",
@@ -319,6 +311,7 @@ def test_context_projects_sha_orphans_and_drops_secrets() -> None:
 
     result = Client(opener=opener).get_fractal_context()
     assert result["scene_revision"] == SHA
+    assert result["witness"] == _witness()
     assert result["retained_orphans"] == [{"target": "fractal.look.ambient", "reason": "retained_driver"}]
     assert result["capabilities"] == ["animation.sample/1"]
     assert result["base"] == {"fractal.camera.yaw": 0.5}
@@ -483,7 +476,8 @@ def test_sequence_resource_refusal_and_lost_render_do_not_mint() -> None:
     assert posts["n"] == 1
     assert lost_exc.value.kind == "fractal_sequence_outcome_unknown"
     assert lost_exc.value.receipt["status"] == "unknown"
-    assert "sequence_id" not in lost_exc.value.receipt
+    assert lost_exc.value.receipt["sequence_id"] == "seq_" + __import__("hashlib").sha256(
+        f"fractal-sequence/1\0{SCENE}\0job-1".encode()).hexdigest()[:32]
 
 
 def test_known_sequence_404_stays_unknown() -> None:
@@ -566,3 +560,59 @@ def test_server_dispatches_context_without_a_private_file_read() -> None:
     client = type("C", (), {})()
     client.get_fractal_context = lambda: {"scene_id": SCENE, "scene_revision": SHA}
     assert HextileMcpServer(client=client)._get_fractal_context({})["scene_revision"] == SHA
+
+
+@pytest.mark.parametrize("ops", [
+    [{"op": "upsert_input_gate", "value": {"id": "fire", "alias": "Fire", "label": "Fire", "mode": "gate", "unit": "gate", "min": 0, "max": 1, "default": 0, "arm": True}}],
+    [{"op": "upsert_input_binding", "value": {"id": "fire_key", "channel_id": "fire", "source": {"kind": "key", "code": "KeyF", "modifiers": ["Super"]}, "scale": 1, "activation": "interact"}}],
+])
+def test_dispatch_rejects_nested_extra_fields_before_post(ops: list[Any]) -> None:
+    seen = []
+    def opener(req: Any, timeout: Any = None) -> _Response:
+        seen.append(req)
+        return _Response({"enabled": True})
+    result = HextileMcpServer(client=Client(opener=opener)).call_tool("apply_fractal_edits", _edit(ops))
+    assert result["isError"] is True
+    assert json.loads(result["content"][0]["text"])["status_code"] == 422
+    assert not any(req.full_url.endswith("/api/agent/fractal-actions") for req in seen)
+
+
+def test_sequence_detail_keeps_current_attempt_for_controls_without_paths() -> None:
+    attempt = {"attempt_id": ATTEMPT, "attempt_revision": 4, "status": "running", "frames_completed": 1,
+               "transaction_fingerprint": SHA, "destination_folder": "/tmp/secret"}
+    def opener(req: Any, timeout: Any = None) -> _Response:
+        return _Response({"sequence_id": SEQ, "status": "completed", "frame_rate": {"num": 30000, "den": 1001},
+                          "start_time": {"num": "0", "den": "1"}, "end_time": {"num": "1001", "den": "15000"},
+                          "attempt_id": ATTEMPT, "attempt_revision": 4, "folder_export": attempt,
+                          "publication_attempts": [attempt], "frames_completed": 2, "frames_failed": 0})
+    result = Client(opener=opener).get_fractal_sequence(SEQ)
+    assert result["attempt_id"] == ATTEMPT
+    assert result["attempt_revision"] == 4
+    assert result["folder_export"]["attempt_revision"] == 4
+    assert result["publication_attempts"] == [result["folder_export"]]
+    assert result["frame_rate"] == {"num": 30000, "den": 1001}
+    assert result["start_time"] == {"num": "0", "den": "1"}
+    assert "/tmp" not in json.dumps(result)
+
+
+def test_export_receipt_keeps_actual_producer_attempt_revision() -> None:
+    def opener(req: Any, timeout: Any = None) -> _Response:
+        return _Response({"sequence_id": SEQ, "attempt_id": ATTEMPT, "attempt_revision": 0,
+                          "transaction_fingerprint": SHA, "recipe_hash": BASE, "status": "queued"})
+    result = Client(opener=opener).export_fractal_sequence({"sequence_id": SEQ, "destination_folder": "/tmp/frames",
+                                                        "format": "PNG", "transaction_fingerprint": SHA})
+    assert result["attempt_revision"] == 0
+
+
+@pytest.mark.parametrize("over", [
+    {"frame_rate": {"num": 60, "den": 2}},
+    {"frame_rate": {"num": 121, "den": 1}},
+    {"start_time": {"num": "0", "den": "2"}},
+    {"end_time": {"num": "1", "den": "1"}},
+])
+def test_exact_sequence_range_refuses_before_http(over: dict[str, Any]) -> None:
+    def unexpected(*args: Any, **kwargs: Any) -> _Response:
+        raise AssertionError("invalid exact time reached HTTP")
+    with pytest.raises(HextileClientError) as exc:
+        Client(opener=unexpected).preflight_fractal_sequence(_sequence(**over))
+    assert exc.value.status_code == 422

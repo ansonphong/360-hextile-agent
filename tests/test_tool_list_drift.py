@@ -277,10 +277,9 @@ def test_app_tool_names_ast_equals() -> None:
     app_path = ROOT.parent / "360-HEXTILE-APP" / "backend" / "api" / "routes" / "agent_events.py"
     assert app_path.is_file(), f"missing sibling APP inventory: {app_path}"
     app_names = _names_from_assign(app_path.read_text(encoding="utf-8"), "TOOL_NAMES")
-    # T15.2 publishes these twelve names into APP with the bundle. Until then the
-    # canonical list is ahead and the APP inventory stays the pre-sync set.
-    assert set(TOOL_NAMES) - FRACTAL_CANONICAL_AHEAD == app_names
-    assert FRACTAL_CANONICAL_AHEAD.isdisjoint(app_names)
+    # T15.2 must publish the committed canonical inventory with its bundle.
+    # A deliberately unvendored APP is a dependency failure, never false green.
+    assert set(TOOL_NAMES) == app_names
 
 
 def test_gpu_diagnostics_and_retry_client_routes() -> None:

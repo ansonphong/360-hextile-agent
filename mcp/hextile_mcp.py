@@ -695,7 +695,7 @@ _FRACTAL_HEADER = _shader_closed({
     "activationToken": {"type": "string", "minLength": 1, "maxLength": 128},
     "sessionId": {"type": "string", "minLength": 1, "maxLength": 128},
     "subjectKey": {"type": "string", "minLength": 1, "maxLength": 128},
-    "projectId": {"type": "string", "maxLength": 256},
+    "projectId": {"oneOf": [{"type": "string", "maxLength": 256}, {"const": None}]},
 }, ("projectId",))
 _FRACTAL_WITNESS = _shader_closed({
     "header_witness": _FRACTAL_HEADER,
@@ -715,8 +715,9 @@ _FRACTAL_GATE = _shader_closed({
 })
 _FRACTAL_KEY_SOURCE = _shader_closed({
     "kind": {"const": "key"},
-    "code": {"type": "string", "minLength": 1, "maxLength": 64},
-    "modifiers": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 32}},
+    "code": {"type": "string", "pattern": r"^(?:Key[A-Z]|Digit[0-9]|Numpad[0-9]|NumpadEnter|F(?:[1-9]|1[0-9]|2[0-4])|Arrow(?:Up|Down|Left|Right)|Page(?:Up|Down)|Home|End|Insert|Delete|Space|Enter|Backquote|Minus|Equal|Bracket(?:Left|Right)|Backslash|Semicolon|Quote|Comma|Period|Slash|Intl(?:Backslash|Ro|Yen)|Shift(?:Left|Right)|Control(?:Left|Right)|Alt(?:Left|Right)|Meta(?:Left|Right))$"},
+    "modifiers": {"type": "array", "maxItems": 4, "uniqueItems": True,
+                  "items": {"enum": ["Alt", "Control", "Meta", "Shift"]}},
 })
 _FRACTAL_GATE_BINDING = _shader_closed({
     "id": _FRACTAL_GATE_ID, "channel_id": _FRACTAL_GATE_ID, "source": _FRACTAL_KEY_SOURCE,
@@ -734,8 +735,8 @@ _FRACTAL_ENVELOPE_SETTINGS = _shader_closed({
 })
 _FRACTAL_CLICK_SETTINGS = _shader_closed({"output_min": {"type": "number"}, "output_max": {"type": "number"}})
 _FRACTAL_TIME_SETTINGS = _shader_closed({
-    "period": {"type": "number", "exclusiveMinimum": 0}, "speed": {"type": "number"},
-    "phase": {"type": "number"}, "output_min": {"type": "number"}, "output_max": {"type": "number"},
+    "period": {"type": "number", "minimum": 1e-6, "maximum": 86400}, "speed": {"type": "number", "minimum": 0, "maximum": 1024},
+    "phase": {"type": "number", "minimum": -1e9, "maximum": 1e9}, "output_min": {"type": "number"}, "output_max": {"type": "number"},
     "duty": {"type": "number", "minimum": 0, "maximum": 1},
 })
 _FRACTAL_DEF_COMMON = {"id": _SHADER_MOD_ID, "alias": _SHADER_ALIAS, "label": {"type": "string", "maxLength": 128}, "enabled": {"type": "boolean"}}
@@ -2260,7 +2261,9 @@ TOOLS: list[dict[str, Any]] = [
     _tool_def("get_fractal_context",
         "Read the mounted Fractal workshop. Returns scene identity, SHA revisions, registry target IDs, "
         "retained orphan driver targets, admitted capabilities, suspensions, diagnostics, and numeric base/effective values. "
-        "No source, path, formula image, or grant. A context receipt is not Follow and not a Fractal lease.",
+        "Includes the public action witness and source-free Follow/grant discovery, never a private lease. "
+        "No source, path or formula image. Missing optional summaries are unavailable, not inferred. "
+        "A context receipt is not Follow and not a Fractal lease.",
         {}),
     {"name": "apply_fractal_edits",
      "description": "Submit one closed Fractal authoring batch through Follow and the current human Fractal grant. "
@@ -2765,7 +2768,7 @@ class HextileMcpServer:
         call_id = str(uuid.uuid4())
         args = dict(arguments) if isinstance(arguments, dict) else {}
         for key in tuple(args):
-            if key.lower() in _PRIVATE_ARGUMENT_KEYS:
+            if key.lower() in _PRIVATE_ARGUMENT_KEYS and "_fractal_" not in name:
                 args.pop(key, None)
         overrides_keys = _overrides_keys(name, args)
         self._emit_activity(
@@ -3436,42 +3439,116 @@ class HextileMcpServer:
         validate_shader_doctor("get", args)
         return self.client.get_shader_doctor(args)
 
+    @staticmethod
+    def _validate_fractal_args(name: str, args: Any) -> None:
+        """Enforce the Fractal catalog's closed wire shapes before HTTP dispatch."""
+        def matches(value: Any, schema: dict[str, Any]) -> bool:
+            if "oneOf" in schema and sum(matches(value, row) for row in schema["oneOf"]) != 1:
+                return False
+            if "anyOf" in schema and not any(matches(value, row) for row in schema["anyOf"]):
+                return False
+            if "not" in schema and matches(value, schema["not"]):
+                return False
+            if "const" in schema and (value != schema["const"] or isinstance(value, bool) != isinstance(schema["const"], bool)):
+                return False
+            if "enum" in schema and (value not in schema["enum"] or type(value) is bool):
+                return False
+            kind = schema.get("type")
+            if kind == "object" and type(value) is not dict or kind == "array" and type(value) is not list:
+                return False
+            if kind == "string" and type(value) is not str or kind == "integer" and type(value) is not int:
+                return False
+            if kind == "boolean" and type(value) is not bool:
+                return False
+            if kind == "number" and (type(value) not in (int, float) or not math.isfinite(value)):
+                return False
+            if isinstance(value, dict):
+                props = schema.get("properties", {})
+                if not set(schema.get("required", [])) <= value.keys():
+                    return False
+                if schema.get("additionalProperties") is False and not value.keys() <= props.keys():
+                    return False
+                if len(value) > schema.get("maxProperties", float("inf")):
+                    return False
+                for key, item in value.items():
+                    child = props.get(key, schema.get("additionalProperties", {}))
+                    if isinstance(child, dict) and not matches(item, child):
+                        return False
+                    if "propertyNames" in schema and not matches(key, schema["propertyNames"]):
+                        return False
+            if isinstance(value, list):
+                if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", float("inf")):
+                    return False
+                if schema.get("uniqueItems") and len({json.dumps(v, sort_keys=True) for v in value}) != len(value):
+                    return False
+                if any(not matches(item, schema.get("items", {})) for item in value):
+                    return False
+            if isinstance(value, str):
+                if not schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", float("inf")):
+                    return False
+                if "pattern" in schema and re.search(schema["pattern"], value) is None:
+                    return False
+            if type(value) in (int, float):
+                if not schema.get("minimum", -float("inf")) <= value <= schema.get("maximum", float("inf")):
+                    return False
+                if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+                    return False
+            if "if" in schema and not matches(value, schema.get("then" if matches(value, schema["if"]) else "else", {})):
+                return False
+            return all(matches(value, row) for row in schema.get("allOf", []))
+
+        schema = next(tool["inputSchema"] for tool in TOOLS if tool["name"] == name)
+        if not matches(args, schema):
+            raise HextileClientError("Invalid closed Fractal tool arguments", kind="other", status_code=422)
+
     def _get_fractal_context(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("get_fractal_context", args)
         if args:
             raise HextileClientError("get_fractal_context takes no arguments", kind="other", status_code=422)
         return self.client.get_fractal_context()
 
     def _apply_fractal_edits(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("apply_fractal_edits", args)
         return self.client.apply_fractal_edits(args)
 
     def _control_fractal_timeline(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("control_fractal_timeline", args)
         return self.client.control_fractal_timeline(args)
 
     def _open_fractal_scene(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("open_fractal_scene", args)
         return self.client.open_fractal_scene(args)
 
     def _save_fractal_scene(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("save_fractal_scene", args)
         return self.client.save_fractal_scene(args)
 
     def _get_fractal_request(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("get_fractal_request", args)
         return self.client.get_fractal_request(args.get("client_request_id"))
 
     def _preflight_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("preflight_fractal_sequence", args)
         return self.client.preflight_fractal_sequence(args)
 
     def _render_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("render_fractal_sequence", args)
         return self.client.render_fractal_sequence(args)
 
     def _get_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("get_fractal_sequence", args)
         return self.client.get_fractal_sequence(args.get("sequence_id"))
 
     def _control_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("control_fractal_sequence", args)
         return self.client.control_fractal_sequence(args)
 
     def _preflight_fractal_sequence_export(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("preflight_fractal_sequence_export", args)
         return self.client.preflight_fractal_sequence_export(args)
 
     def _export_fractal_sequence(self, args: dict[str, Any]) -> Any:
+        self._validate_fractal_args("export_fractal_sequence", args)
         return self.client.export_fractal_sequence(args)
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
