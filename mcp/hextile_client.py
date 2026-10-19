@@ -884,12 +884,25 @@ class Client:
             },
         )
 
-    def get_shader_parameters(self) -> Any:
-        """Read only the mounted Shader's source-free exposed controls."""
-        return self.get_json("/api/agent/shader-parameters", headers={"X-Hextile-Agent": "mcp"})
+    @staticmethod
+    def _shader_parameter_headers(session_id: str) -> dict[str, str]:
+        """The stdio proxy supplies this origin; tool arguments never do."""
+        try:
+            valid = type(session_id) is str and str(uuid.UUID(session_id)) == session_id
+        except (ValueError, AttributeError, TypeError):
+            valid = False
+        if not valid:
+            raise HextileClientError("Invalid MCP session origin", kind="other", status_code=422)
+        return {"X-Hextile-Agent": "mcp", "X-Hextile-Mcp-Session": session_id}
 
-    def set_shader_parameter(self, args: Mapping[str, Any]) -> Any:
+    def get_shader_parameters(self, *, session_id: str) -> Any:
+        """Read only the mounted Shader's source-free exposed controls."""
+        return self.get_json("/api/agent/shader-parameters",
+                             headers=self._shader_parameter_headers(session_id))
+
+    def set_shader_parameter(self, args: Mapping[str, Any], *, session_id: str) -> Any:
         """Submit one witnessed value edit or reconcile its original request ID."""
+        headers = self._shader_parameter_headers(session_id)
         request_id = args.get("client_request_id") if isinstance(args, Mapping) else None
         if type(request_id) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request_id) is None:
             raise HextileClientError("Invalid Shader parameter client_request_id", kind="other", status_code=422)
@@ -899,7 +912,7 @@ class Client:
                 raise HextileClientError("Expected exact Shader parameter status arguments", kind="other", status_code=422)
             try:
                 data = self.get_json(f"/api/agent/shader-parameter/requests/{request_id}",
-                                     headers={"X-Hextile-Agent": "mcp"})
+                                     headers=headers)
             except HextileClientError as exc:
                 if exc.status_code == 404:
                     raise HextileClientError(
@@ -954,9 +967,14 @@ class Client:
         value = args["value"]
         if not finite_json(value) or len(json.dumps(value, allow_nan=False).encode("utf-8")) > 65536:
             raise HextileClientError("Shader parameter value must be bounded finite JSON", kind="other", status_code=422)
+        discovery = self.get_shader_parameters(session_id=session_id)
+        if not isinstance(discovery, Mapping) or type(discovery.get("follow_ready")) is not bool:
+            raise HextileClientError(
+                "Upgrade 360 Hextile before changing a Shader parameter; this APP lacks session-bound Follow readiness.",
+                kind="upgrade", status_code=409)
         body = {key: args[key] for key in ("client_request_id", "witness", "parameter_id", "value")}
         try:
-            data = self.post_json("/api/agent/shader-parameter", body, headers={"X-Hextile-Agent": "mcp"})
+            data = self.post_json("/api/agent/shader-parameter", body, headers=headers)
             return self._shader_parameter_receipt(data, request_id, submit=True)
         except HextileClientError as exc:
             if (exc.kind == "app_down" or exc.status_code is None or exc.status_code >= 500

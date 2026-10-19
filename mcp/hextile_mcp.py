@@ -2099,14 +2099,17 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def("get_shader_parameters",
         "Read exposed controls on the mounted Shader without a source grant. Returns bounded IDs, labels, "
-        "types, current/default values, UI bounds and choices, plus an exact witness and writable state. "
-        "No GLSL, formula or help source is returned. MCP must be enabled; Follow may be off for this read.",
+        "types, current/default values, UI bounds and choices, plus an exact witness, authoring writable state, "
+        "and this session's follow_ready state or block reason. No GLSL, formula or help source is returned. "
+        "MCP must be enabled; Follow may be off for this read.",
         {}),
     _tool_def("set_shader_parameter",
-        "Change one exposed control on the exact witnessed mounted Shader through Follow. "
-        "Submit a caller-known ID once; use operation=status with that same ID after an uncertain reply. "
-        "Runtime bounds and writability are authoritative. This needs MCP and Follow, not a source lease; "
-        "source proposals still need separate grants and human Apply.",
+        "Change one exposed control on the exact witnessed mounted Shader when this MCP session is selected "
+        "and follow_ready. Submit a caller-known ID once; use operation=status with that original ID after "
+        "an uncertain reply, including after Follow or selection changes. Writable describes authoring only. "
+        "Applied acknowledges an edit, not Save or a permanent current value. An unknown outcome needs a fresh "
+        "read and human direction before any new ID. Source and formula access require separate grants; "
+        "structural proposals need human Apply.",
         {"operation": {"enum": ["submit", "status"]},
          "client_request_id": {"type": "string", "minLength": 1, "maxLength": 64,
                                "pattern": r"^[A-Za-z0-9_-]+$"},
@@ -3391,10 +3394,10 @@ class HextileMcpServer:
     def _get_shader_parameters(self, args: dict[str, Any]) -> Any:
         if args:
             raise HextileClientError("Expected no Shader parameter discovery arguments", kind="other", status_code=422)
-        return self.client.get_shader_parameters()
+        return self.client.get_shader_parameters(session_id=self._ensure_session_id())
 
     def _set_shader_parameter(self, args: dict[str, Any]) -> Any:
-        return self.client.set_shader_parameter(args)
+        return self.client.set_shader_parameter(args, session_id=self._ensure_session_id())
 
     def _control_shader_timeline(self, args: dict[str, Any]) -> Any:
         return self.client.control_shader_timeline(args)
