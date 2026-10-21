@@ -125,7 +125,7 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
 | `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
 | `get_shader_parameters` | Read exposed mounted Shader parameter IDs, values, bounds, exact witness, authoring `writable`, and this session's `follow_ready` or block reason. MCP enabled; no source grant or Follow needed for this read | no |
-| `set_shader_parameter` | Set one witnessed value only when this MCP session is selected and `follow_ready`. Use `operation=status` with the original `client_request_id` after an uncertain reply, even if selection or Follow changes. `applied` acknowledges an edit, not Save | **yes** |
+| `set_shader_parameter` | Ordinary mode needs this MCP session selected and `follow_ready`. Effective Trusted Local Full Access requires no session pick. Use `operation=status` with the original `client_request_id` after an uncertain reply, even if selection or Follow changes. `applied` acknowledges an edit, not Save | **yes** |
 | `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
 | `control_shader_timeline` | Play, pause, seek, or reset the mounted Shader session through Follow and an exact owner witness; use its status branch with the same caller ID after an uncertain reply | **yes** |
 | `preflight_shader_sequence` | Check a confirmed saved Shader revision, exact rational interval and explicit native output; returns a deterministic sequence ID before queueing | no |
@@ -154,10 +154,10 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `get_local_access_status` | Read MCP enabled and effective Trusted Local Full Access; works with MCP OFF and no Studio | no |
 | `local_file_stat` | Stat one absolute regular file (`size`, `sha256`, opaque `version`) | no |
 | `local_file_read` | Read a bounded chunk (`data` ≤ 32 KiB decoded; complete JSON ≤ 65536 bytes) | no |
-| `local_file_write_begin` | Start staged create (`expected_sha256` null) or CAS replace (64-hex SHA-256) | **yes** |
+| `local_file_write_begin` | Start staged create (`expected_sha256` null) or replace with the current 64-hex SHA-256 | **yes** |
 | `local_file_write_append` | Append one ordered Base64 chunk (≤ 64 KiB decoded); identical index/data is idempotent | **yes** |
 | `local_file_write_abort` | Abort staging; does not publish the target | **yes** |
-| `local_file_write_commit` | Publish staged bytes; create-only or CAS replace of durable bytes | **yes** |
+| `local_file_write_commit` | Publish staged bytes; create-only, or optimistic expected-SHA check then atomic same-directory publication | **yes** |
 | `local_file_write_status` | Reconcile the original `request_id` after a lost reply, revoke, or MCP OFF | no |
 
 ### Trusted local files
@@ -167,7 +167,7 @@ Call `get_local_access_status` first. `local_file_stat`, `local_file_read`, and 
 1. `local_file_stat(path)` → `{size, sha256, version}` for an absolute regular file. No symlink following.
 2. `local_file_read(path, expected_version, offset, max_bytes, encoding?)` → `{offset, next_offset, eof, encoding, data, version}`. `encoding` is `utf-8` or `base64`. APP may return base64 rather than omit bytes.
 3. Create: `local_file_write_begin(request_id, path, mode="create", expected_sha256=null, total_bytes)` then ordered `local_file_write_append(write_id, index, data_base64)`, then `local_file_write_commit(write_id)`. Create-only never overwrites.
-4. Replace: begin with `mode="replace"` and the current 64-hex `expected_sha256`. Commit uses CAS; a stale target is `stale_cas` / conflict, not a partial publish.
+4. Replace: begin with `mode="replace"` and the current 64-hex `expected_sha256`. Commit does optimistic expected-SHA stale checking, then atomic same-directory publication, serialized among APP file-service writers. A stale target observed at check is `stale_cas` / conflict, not a partial publish. An outside process can edit after the check and before publication; this is not atomic expected-hash CAS against arbitrary outside editors.
 5. `local_file_write_abort(write_id)` abandons staging.
 6. Lost commit, revoke, or MCP OFF: `local_file_write_status(request_id)` with the original canonical UUIDv4. Status is `pending`, `committed`, `aborted`, `revoked`, `conflict`, or `outcome_unknown`. Do not mint a new ID or auto-retry `outcome_unknown`.
 

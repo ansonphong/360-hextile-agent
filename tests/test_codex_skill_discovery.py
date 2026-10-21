@@ -93,6 +93,14 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
     assert "get_local_access_status" in umbrella
     assert "local_file_write_commit" in umbrella
     assert "local_file_write_status" in umbrella
+    assert "Ordinary mode needs this MCP session selected and `follow_ready`" in umbrella
+    assert "Effective Trusted Local Full Access requires no session pick" in umbrella
+    assert "optimistic expected-SHA" in umbrella
+    assert "atomic same-directory publication" in umbrella
+    assert "not atomic expected-hash CAS against arbitrary outside editors" in umbrella
+    assert "Commit uses CAS" not in umbrella
+    assert "SHA-256 CAS" not in umbrella
+    assert "CAS replace" not in umbrella
     assert "Trusted Local Full Access" in specialized
     assert "spt_" in specialized
     assert "cpr_" in specialized

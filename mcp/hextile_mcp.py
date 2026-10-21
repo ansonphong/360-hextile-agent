@@ -2428,7 +2428,10 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool_def(
         "local_file_write_commit",
-        "Publish staged bytes. create is create-only; replace uses SHA-256 CAS and can replace durable bytes. "
+        "Publish staged bytes. create is create-only. Replace uses optimistic expected-SHA stale checking "
+        "then atomic same-directory publication, serialized among APP file-service writers. An outside process "
+        "can edit after the check and before publication; this is not atomic expected-hash CAS against "
+        "arbitrary outside editors. Observed stale targets still refuse as stale_cas. "
         "Requires effective trust at commit. A lost reply is local_file_write_status with the original "
         "request_id; never mint a new id or auto-retry outcome_unknown.",
         {"write_id": _WRITE_ID},
