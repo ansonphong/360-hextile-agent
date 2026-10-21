@@ -32,6 +32,21 @@ def _schema(name: str) -> dict[str, Any]:
     return next(tool for tool in TOOLS if tool["name"] == name)
 
 
+def test_served_best_practices_preserve_shader_credit_authority() -> None:
+    from hextile_mcp import load_guide
+
+    guide = load_guide("best-practices")["markdown"]
+    skill = (ROOT / "skills" / "shader" / "SKILL.md").read_text(encoding="utf-8")
+    for text in (guide, skill):
+        assert "extensions.lineage" in text
+        assert "extensions.retained_credits" in text
+        assert "ai_assistance" in text
+        assert "repair registrations" in text
+        assert "v1 cannot edit provenance" in text
+        assert "extensions.distribution" in text
+        assert "permission to distribute" in text
+
+
 def _parameter_witness() -> dict[str, Any]:
     return {"studio_surface_id": "surface", "project_context_witness": "wit",
             "shader": {"origin": "user", "shaderId": "aurora"},
