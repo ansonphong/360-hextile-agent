@@ -2138,8 +2138,9 @@ TOOLS: list[dict[str, Any]] = [
         "MCP must be enabled; Follow may be off for this read.",
         {}),
     _tool_def("set_shader_parameter",
-        "Change one exposed control on the exact witnessed mounted Shader when this MCP session is selected "
-        "and follow_ready. Submit a caller-known ID once; use operation=status with that original ID after "
+        "Change one exposed control on the exact witnessed mounted Shader. Ordinary mode requires this MCP "
+        "session selected and follow_ready; effective Trusted Local Full Access requires no session pick or Follow. "
+        "Submit a caller-known ID once; use operation=status with that original ID after "
         "an uncertain reply, including after Follow or selection changes. Writable describes authoring only. "
         "Applied acknowledges an edit, not Save or a permanent current value. An unknown outcome needs a fresh "
         "read and human direction before any new ID. Source and formula access require separate grants; "
