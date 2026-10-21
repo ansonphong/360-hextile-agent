@@ -1,5 +1,7 @@
 # Workflow automation — best practices
 
+Permission mode: read `get_local_access_status`. Effective `trusted_local_full_access` removes Hextile's per-call approval, Follow/session selection and per-document source-grant gestures; validated singular Shader candidates use APP's automatic Apply-and-persist path. Treat the human permission instructions below as standard-mode instructions. Do not ask the user to arm or Resume those permissions while trusted mode is effective. Refresh stale context and reconcile uncertain original request IDs; never infer Save from compilation. Native validation, job admission, physical-input restrictions and any separate MCP-host permissions still apply.
+
 ## Authority
 
 Send **`workflow_id` + `overrides`**, or a full `document` you cloned from `get_workflow`. Never invent a raw config as the source of truth. The app deep-merges and runs `HextileConfig`. A 422 is a fixable override, not a crash.

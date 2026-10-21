@@ -1,5 +1,7 @@
 # Workflow schema (agent)
 
+Permission mode: read `get_local_access_status`. When effective `trusted_local_full_access` is true, APP supplies Follow and current-document grants for every local session and automatically applies and persists validated singular Shader candidates. Standard-mode requirements below for session selection, separate grants and human Apply need no further user gesture in trusted mode. Native witnesses, compile checks, revision conflicts and original-request reconciliation still apply; compilation alone is not a Save receipt. The MCP host may enforce its own permissions.
+
 A **Workflow** is a full `.hextile.json` document. There is no second format.
 
 Validated by APP `HextileConfig`. The MCP never merges or validates as authority.
