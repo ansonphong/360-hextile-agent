@@ -155,6 +155,14 @@ EXPECTED_TOOLS = (
     "control_fractal_sequence",
     "preflight_fractal_sequence_export",
     "export_fractal_sequence",
+    "get_local_access_status",
+    "local_file_stat",
+    "local_file_read",
+    "local_file_write_begin",
+    "local_file_write_append",
+    "local_file_write_abort",
+    "local_file_write_commit",
+    "local_file_write_status",
 )
 
 FRACTAL_CANONICAL_AHEAD = frozenset({
@@ -250,6 +258,278 @@ def test_open4_annotations_partition() -> None:
         "render_fractal_sequence", "control_fractal_sequence", "export_fractal_sequence",
     } <= _MUTATING
     assert not FRACTAL_CANONICAL_AHEAD & _DESTRUCTIVE
+    assert {
+        "get_local_access_status", "local_file_stat", "local_file_read", "local_file_write_status",
+    } <= _READ_ONLY
+    assert {
+        "local_file_write_begin", "local_file_write_append",
+        "local_file_write_abort", "local_file_write_commit",
+    } <= _MUTATING
+    assert "local_file_write_commit" in _DESTRUCTIVE
+    assert not {
+        "local_file_write_begin", "local_file_write_append", "local_file_write_abort",
+    } & _DESTRUCTIVE
+
+
+_LOCAL_FILE_TOOLS = (
+    "get_local_access_status",
+    "local_file_stat",
+    "local_file_read",
+    "local_file_write_begin",
+    "local_file_write_append",
+    "local_file_write_abort",
+    "local_file_write_commit",
+    "local_file_write_status",
+)
+_SESSION_ID = "11111111-1111-4111-8111-111111111111"
+_REQUEST_ID = "22222222-2222-4222-8222-222222222222"
+_WRITE_ID = "33333333-3333-4333-8333-333333333333"
+_SHA256 = "ab" * 32
+
+
+def test_trusted_local_file_contract() -> None:
+    for name in _LOCAL_FILE_TOOLS:
+        assert name in EXPECTED_TOOLS
+        assert name in TOOL_NAMES
+        assert name in {t["name"] for t in TOOLS}
+
+    access = _tool_schema("get_local_access_status")
+    assert access["properties"] == {}
+    assert access.get("additionalProperties") is False
+    assert "required" not in access
+
+    stat = _tool_schema("local_file_stat")
+    assert set(stat["properties"]) == {"path"}
+    assert stat["required"] == ["path"]
+    assert stat["additionalProperties"] is False
+
+    read = _tool_schema("local_file_read")
+    assert set(read["properties"]) == {"path", "expected_version", "offset", "max_bytes", "encoding"}
+    assert read["required"] == ["path", "expected_version", "offset", "max_bytes"]
+    assert read["properties"]["max_bytes"]["maximum"] == 32768
+    assert read["properties"]["encoding"]["enum"] == ["utf-8", "base64"]
+    jsonschema.validate(
+        {"path": "/tmp/x", "expected_version": "v1", "offset": 0, "max_bytes": 1024},
+        read,
+    )
+    jsonschema.validate(
+        {"path": "/tmp/x", "expected_version": "v1", "offset": 0, "max_bytes": 1024, "encoding": "base64"},
+        read,
+    )
+
+    begin = _tool_schema("local_file_write_begin")
+    assert begin["required"] == ["request_id", "path", "mode", "expected_sha256", "total_bytes"]
+    assert begin["properties"]["mode"]["enum"] == ["create", "replace"]
+    jsonschema.validate(
+        {"request_id": _REQUEST_ID, "path": "/tmp/x", "mode": "create",
+         "expected_sha256": None, "total_bytes": 4},
+        begin,
+    )
+    jsonschema.validate(
+        {"request_id": _REQUEST_ID, "path": "/tmp/x", "mode": "replace",
+         "expected_sha256": _SHA256, "total_bytes": 4},
+        begin,
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {"request_id": _REQUEST_ID, "path": "/tmp/x", "mode": "replace",
+             "expected_sha256": "not-a-hash", "total_bytes": 4},
+            begin,
+        )
+
+    append = _tool_schema("local_file_write_append")
+    assert append["required"] == ["write_id", "index", "data_base64"]
+    assert append["properties"]["data_base64"]["maxLength"] == 87384
+    jsonschema.validate({"write_id": _WRITE_ID, "index": 0, "data_base64": "YQ=="}, append)
+
+    for name in ("local_file_write_abort", "local_file_write_commit"):
+        schema = _tool_schema(name)
+        assert schema["required"] == ["write_id"]
+        assert set(schema["properties"]) == {"write_id"}
+
+    status_schema = _tool_schema("local_file_write_status")
+    assert status_schema["required"] == ["request_id"]
+    jsonschema.validate({"request_id": _REQUEST_ID}, status_schema)
+
+    seen: list[tuple[str, str, Any, dict[str, str]]] = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, body: Any) -> None:
+            self.body = body
+
+        def read(self) -> bytes:
+            return json.dumps(self.body).encode("utf-8")
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def opener(req: Any, timeout: Any = None) -> Response:
+        headers = {k.lower(): v for k, v in req.header_items()}
+        payload = json.loads(req.data) if req.data else None
+        seen.append((req.get_method(), req.full_url, payload, headers))
+        url = req.full_url
+        if url.endswith("/api/agent/events"):
+            return Response({"ok": True})
+        if url.endswith("/api/agent/mcp-status"):
+            return Response({"enabled": True, "trusted_local_full_access": True})
+        if "/api/agent/local-files/stat" in url:
+            return Response({"size": 4, "sha256": _SHA256, "version": "v1"})
+        if "/api/agent/local-files/read" in url:
+            return Response({
+                "offset": 0, "next_offset": 4, "eof": True,
+                "encoding": "utf-8", "data": "abcd", "version": "v1",
+            })
+        if url.endswith("/api/agent/local-files/writes"):
+            return Response({
+                "request_id": _REQUEST_ID, "write_id": _WRITE_ID,
+                "status": "pending", "next_offset": 0,
+            })
+        if url.endswith(f"/writes/{_WRITE_ID}/chunks"):
+            return Response({"next_offset": 4})
+        if url.endswith(f"/writes/{_WRITE_ID}/abort"):
+            return Response({
+                "request_id": _REQUEST_ID, "write_id": _WRITE_ID, "status": "aborted",
+            })
+        if url.endswith(f"/writes/{_WRITE_ID}/commit"):
+            return Response({
+                "request_id": _REQUEST_ID, "write_id": _WRITE_ID,
+                "status": "committed", "sha256": _SHA256, "size": 4,
+            })
+        if url.endswith(f"/writes/requests/{_REQUEST_ID}"):
+            return Response({
+                "request_id": _REQUEST_ID, "write_id": _WRITE_ID, "status": "revoked",
+                "path": "/secret", "content": "nope",
+            })
+        if "/api/agent/live-context" in url:
+            return Response({
+                "trusted_local_full_access": True,
+                "follow": {"on": True, "secret": "drop-me"},
+                "current_surface": {
+                    "kind": "fractal_workshop",
+                    "scene_id": "scn_abcdef12",
+                    "path": "/should-not-leak",
+                },
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    server = HextileMcpServer(client=Client(opener=opener))
+    server.session_id = _SESSION_ID
+
+    access_result = server.call_tool("get_local_access_status", {})
+    assert access_result["isError"] is False
+    assert json.loads(access_result["content"][0]["text"]) == {
+        "enabled": True, "trusted_local_full_access": True,
+    }
+
+    stat_result = server.call_tool("local_file_stat", {"path": "/tmp/x"})
+    assert json.loads(stat_result["content"][0]["text"])["sha256"] == _SHA256
+    read_result = server.call_tool("local_file_read", {
+        "path": "/tmp/x", "expected_version": "v1", "offset": 0, "max_bytes": 1024, "encoding": "utf-8",
+    })
+    assert json.loads(read_result["content"][0]["text"])["encoding"] == "utf-8"
+
+    begin_result = server.call_tool("local_file_write_begin", {
+        "request_id": _REQUEST_ID, "path": "/tmp/x", "mode": "create",
+        "expected_sha256": None, "total_bytes": 4,
+    })
+    assert json.loads(begin_result["content"][0]["text"])["write_id"] == _WRITE_ID
+    append_result = server.call_tool("local_file_write_append", {
+        "write_id": _WRITE_ID, "index": 0, "data_base64": "YQ==",
+    })
+    assert json.loads(append_result["content"][0]["text"])["next_offset"] == 4
+    abort_result = server.call_tool("local_file_write_abort", {"write_id": _WRITE_ID})
+    assert json.loads(abort_result["content"][0]["text"])["status"] == "aborted"
+    commit_result = server.call_tool("local_file_write_commit", {"write_id": _WRITE_ID})
+    assert json.loads(commit_result["content"][0]["text"])["status"] == "committed"
+    status_result = server.call_tool("local_file_write_status", {"request_id": _REQUEST_ID})
+    status_payload = json.loads(status_result["content"][0]["text"])
+    assert status_payload["request_id"] == _REQUEST_ID
+    assert status_payload["write_id"] == _WRITE_ID
+    assert status_payload["status"] == "revoked"
+    assert "path" not in status_payload
+    assert "content" not in status_payload
+
+    file_calls = [row for row in seen if "/api/agent/local-files" in row[1] or row[1].endswith("/mcp-status")]
+    assert ("GET", "http://127.0.0.1:8000/api/agent/mcp-status") == file_calls[0][:2]
+    assert "path=%2Ftmp%2Fx" in file_calls[1][1]
+    assert file_calls[1][0] == "GET"
+    assert "/api/agent/local-files/stat" in file_calls[1][1]
+    assert "/api/agent/local-files/read" in file_calls[2][1]
+    assert "expected_version=v1" in file_calls[2][1]
+    assert "offset=0" in file_calls[2][1]
+    assert "max_bytes=1024" in file_calls[2][1]
+    assert "encoding=utf-8" in file_calls[2][1]
+    assert file_calls[3][0:3] == (
+        "POST", "http://127.0.0.1:8000/api/agent/local-files/writes",
+        {"request_id": _REQUEST_ID, "path": "/tmp/x", "mode": "create",
+         "expected_sha256": None, "total_bytes": 4},
+    )
+    assert file_calls[4][0:3] == (
+        "POST", f"http://127.0.0.1:8000/api/agent/local-files/writes/{_WRITE_ID}/chunks",
+        {"index": 0, "data_base64": "YQ=="},
+    )
+    assert file_calls[5][0:3] == (
+        "POST", f"http://127.0.0.1:8000/api/agent/local-files/writes/{_WRITE_ID}/abort", {},
+    )
+    assert file_calls[6][0:3] == (
+        "POST", f"http://127.0.0.1:8000/api/agent/local-files/writes/{_WRITE_ID}/commit", {},
+    )
+    assert file_calls[7][0:2] == (
+        "GET", f"http://127.0.0.1:8000/api/agent/local-files/writes/requests/{_REQUEST_ID}",
+    )
+    for method, url, _body, headers in file_calls[3:]:
+        assert headers["x-hextile-mcp-session"] == _SESSION_ID
+        assert headers["x-hextile-agent"] == "mcp"
+    for method, url, _body, headers in file_calls[:3]:
+        assert "x-hextile-mcp-session" not in headers
+
+    fractal = server.call_tool("get_fractal_context", {})
+    assert fractal["isError"] is False
+    fractal_payload = json.loads(fractal["content"][0]["text"])
+    assert fractal_payload["trusted_local_full_access"] is True
+    assert fractal_payload["scene_id"] == "scn_abcdef12"
+    assert fractal_payload["follow"] == {"on": True}
+    assert "path" not in fractal_payload
+    assert "secret" not in json.dumps(fractal_payload)
+
+    disabled: list[str] = []
+
+    def disabled_request(method: str, path: str, body: Any = None, **kwargs: Any) -> Any:
+        disabled.append(path)
+        if path == "/api/agent/mcp-status":
+            return {"enabled": False, "trusted_local_full_access": False}
+        if path.startswith("/api/agent/local-files/writes/requests/"):
+            return {
+                "request_id": _REQUEST_ID, "write_id": _WRITE_ID, "status": "revoked",
+            }
+        if path == "/api/agent/events":
+            return {"ok": True}
+        raise AssertionError(f"diagnostic tools must not call {path}")
+
+    diagnostic_client = Client()
+    diagnostic_client.request_json = disabled_request  # type: ignore[method-assign]
+    diagnostic = HextileMcpServer(client=diagnostic_client)
+    diagnostic.session_id = _SESSION_ID
+    off_status = diagnostic.call_tool("get_local_access_status", {})
+    assert off_status["isError"] is False
+    assert json.loads(off_status["content"][0]["text"]) == {
+        "enabled": False, "trusted_local_full_access": False,
+    }
+    off_write = diagnostic.call_tool("local_file_write_status", {"request_id": _REQUEST_ID})
+    assert off_write["isError"] is False
+    assert json.loads(off_write["content"][0]["text"])["status"] == "revoked"
+    refused_stat = diagnostic.call_tool("local_file_stat", {"path": "/tmp/x"})
+    assert refused_stat["isError"] is True
+    assert "disabled" in refused_stat["content"][0]["text"].lower()
+    refused_list = diagnostic.call_tool("list_workflows", {})
+    assert refused_list["isError"] is True
+    assert "/api/agent/local-files/stat" not in disabled
+    assert "/api/workflows" not in disabled
 
 
 def _names_from_assign(source: str, target: str) -> set[str]:

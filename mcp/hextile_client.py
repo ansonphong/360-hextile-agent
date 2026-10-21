@@ -542,6 +542,165 @@ class Client:
             "POST", "/api/agent/events", envelope, timeout=1
         )
 
+    @staticmethod
+    def _canonical_uuid4(value: Any, *, field: str = "request_id") -> str:
+        try:
+            parsed = uuid.UUID(str(value))
+        except (ValueError, AttributeError, TypeError):
+            parsed = None
+        if parsed is None or str(parsed) != value or parsed.version != 4:
+            raise HextileClientError(
+                f"{field} must be a canonical UUID", kind="other", status_code=422,
+            )
+        return value
+
+    @staticmethod
+    def _local_file_path(value: Any) -> str:
+        if type(value) is not str or not 1 <= len(value) <= 4096:
+            raise HextileClientError("path must be an absolute native filesystem path", kind="other", status_code=422)
+        return value
+
+    def get_local_access_status(self) -> dict[str, Any]:
+        """GET /api/agent/mcp-status even with MCP OFF and no Studio."""
+        data = self.get_json("/api/agent/mcp-status")
+        if type(data) is not dict:
+            raise HextileClientError("Invalid MCP status", kind="other")
+        result: dict[str, Any] = {}
+        for key in ("enabled", "trusted_local_full_access"):
+            if type(data.get(key)) is bool:
+                result[key] = data[key]
+        return result
+
+    def local_file_stat(self, path: Any) -> Any:
+        """GET /api/agent/local-files/stat."""
+        return self.get_json(
+            "/api/agent/local-files/stat",
+            params={"path": self._local_file_path(path)},
+        )
+
+    def local_file_read(
+        self,
+        path: Any,
+        *,
+        expected_version: Any,
+        offset: Any,
+        max_bytes: Any,
+        encoding: Any = None,
+    ) -> Any:
+        """GET /api/agent/local-files/read."""
+        if type(expected_version) is not str or not 1 <= len(expected_version) <= 256:
+            raise HextileClientError("expected_version is required", kind="other", status_code=422)
+        if type(offset) is not int or offset < 0:
+            raise HextileClientError("offset must be a non-negative integer", kind="other", status_code=422)
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 32768:
+            raise HextileClientError("max_bytes must be 1..32768", kind="other", status_code=422)
+        if encoding is not None and encoding not in {"utf-8", "base64"}:
+            raise HextileClientError("encoding must be utf-8 or base64", kind="other", status_code=422)
+        params: dict[str, Any] = {
+            "path": self._local_file_path(path),
+            "expected_version": expected_version,
+            "offset": offset,
+            "max_bytes": max_bytes,
+        }
+        if encoding is not None:
+            params["encoding"] = encoding
+        return self.get_json("/api/agent/local-files/read", params=params)
+
+    def local_file_write_begin(
+        self,
+        *,
+        request_id: Any,
+        path: Any,
+        mode: Any,
+        expected_sha256: Any,
+        total_bytes: Any,
+        session_id: str,
+    ) -> Any:
+        """POST /api/agent/local-files/writes."""
+        request_id = self._canonical_uuid4(request_id)
+        if mode not in {"create", "replace"}:
+            raise HextileClientError("mode must be create or replace", kind="other", status_code=422)
+        if type(total_bytes) is not int or total_bytes < 0:
+            raise HextileClientError("total_bytes must be a non-negative integer", kind="other", status_code=422)
+        if mode == "create":
+            if expected_sha256 is not None:
+                raise HextileClientError("create requires expected_sha256 null", kind="other", status_code=422)
+        elif type(expected_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+            raise HextileClientError("replace requires a 64-hex expected_sha256", kind="other", status_code=422)
+        body = {
+            "request_id": request_id,
+            "path": self._local_file_path(path),
+            "mode": mode,
+            "expected_sha256": expected_sha256,
+            "total_bytes": total_bytes,
+        }
+        return self.post_json(
+            "/api/agent/local-files/writes",
+            body,
+            headers=self._shader_parameter_headers(session_id),
+        )
+
+    def local_file_write_append(
+        self,
+        *,
+        write_id: Any,
+        index: Any,
+        data_base64: Any,
+        session_id: str,
+    ) -> Any:
+        """POST /api/agent/local-files/writes/{write_id}/chunks."""
+        if type(write_id) is not str or not 1 <= len(write_id) <= 128:
+            raise HextileClientError("write_id is required", kind="other", status_code=422)
+        if type(index) is not int or index < 0:
+            raise HextileClientError("index must be a non-negative integer", kind="other", status_code=422)
+        if type(data_base64) is not str or not 1 <= len(data_base64) <= 87384:
+            raise HextileClientError("data_base64 must be a bounded Base64 chunk", kind="other", status_code=422)
+        quoted = urllib.parse.quote(write_id, safe="")
+        return self.post_json(
+            f"/api/agent/local-files/writes/{quoted}/chunks",
+            {"index": index, "data_base64": data_base64},
+            headers=self._shader_parameter_headers(session_id),
+        )
+
+    def local_file_write_abort(self, write_id: Any, *, session_id: str) -> Any:
+        """POST /api/agent/local-files/writes/{write_id}/abort."""
+        if type(write_id) is not str or not 1 <= len(write_id) <= 128:
+            raise HextileClientError("write_id is required", kind="other", status_code=422)
+        quoted = urllib.parse.quote(write_id, safe="")
+        return self.post_json(
+            f"/api/agent/local-files/writes/{quoted}/abort",
+            {},
+            headers=self._shader_parameter_headers(session_id),
+        )
+
+    def local_file_write_commit(self, write_id: Any, *, session_id: str) -> Any:
+        """POST /api/agent/local-files/writes/{write_id}/commit."""
+        if type(write_id) is not str or not 1 <= len(write_id) <= 128:
+            raise HextileClientError("write_id is required", kind="other", status_code=422)
+        quoted = urllib.parse.quote(write_id, safe="")
+        return self.post_json(
+            f"/api/agent/local-files/writes/{quoted}/commit",
+            {},
+            headers=self._shader_parameter_headers(session_id),
+        )
+
+    def local_file_write_status(self, request_id: Any, *, session_id: str) -> Any:
+        """GET /api/agent/local-files/writes/requests/{request_id} after trust or MCP OFF."""
+        request_id = self._canonical_uuid4(request_id)
+        quoted = urllib.parse.quote(request_id, safe="")
+        data = self.get_json(
+            f"/api/agent/local-files/writes/requests/{quoted}",
+            headers=self._shader_parameter_headers(session_id),
+        )
+        if type(data) is not dict:
+            raise HextileClientError(
+                "Write outcome unknown. Read the original request_id; do not mint a new id.",
+                kind="other",
+                receipt={"request_id": request_id, "status": "outcome_unknown"},
+            )
+        allowed = ("request_id", "write_id", "status", "next_offset", "sha256", "size")
+        return {key: data[key] for key in allowed if key in data}
+
     # ── workflows ───────────────────────────────────────────────────────
 
     def list_workflows(self) -> Any:
@@ -2396,6 +2555,8 @@ class Client:
         if isinstance(grant, dict) and grant.get("actor") == "external_mcp":
             result["fractal_grant"] = {key: grant[key] for key in (
                 "actor", "scene_id", "expected_draft_generation") if key in grant}
+        if type(data.get("trusted_local_full_access")) is bool:
+            result["trusted_local_full_access"] = data["trusted_local_full_access"]
         return result
 
     @classmethod

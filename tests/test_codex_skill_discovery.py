@@ -89,6 +89,14 @@ def test_install_writes_agents_skills_and_codex_mcp_table(tmp_path: Path) -> Non
     assert "including unused helpers in v2" in specialized
     assert "v2 `authoring.json` has no saved-base field" in specialized
     assert "v1 pair or complete v2 declared set" in umbrella
+    assert "Trusted Local Full Access" in umbrella
+    assert "get_local_access_status" in umbrella
+    assert "local_file_write_commit" in umbrella
+    assert "local_file_write_status" in umbrella
+    assert "Trusted Local Full Access" in specialized
+    assert "spt_" in specialized
+    assert "cpr_" in specialized
+    assert "only the human Applies" in specialized
 
     references = tmp_path / ".agents" / "skills" / "360-hextile" / "references"
     recipes = (references / "recipes.md").read_text(encoding="utf-8")
@@ -313,6 +321,12 @@ def test_fractal_workshop_skill_lands_only_in_the_temp_home(tmp_path: Path) -> N
         "transaction_fingerprint",
         "does not prove an installed host",
         "Interact",
+        "Trusted Local Full Access",
+        "fractal_edit",
+        "fractal_transport",
+        "fractal_open",
+        "fractal_save",
+        "trusted_local_full_access",
     ):
         assert phrase in text
     hub = (tmp_path / ".agents" / "skills" / "360-hextile" / "SKILL.md").read_text(encoding="utf-8")
@@ -321,3 +335,6 @@ def test_fractal_workshop_skill_lands_only_in_the_temp_home(tmp_path: Path) -> N
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "skills/fractal/SKILL.md" in readme
     assert "does not prove an installed host" in readme
+    assert "Trusted Local Full Access" in readme
+    assert "get_local_access_status" in readme
+    assert "local_file_write_status" in readme

@@ -47,7 +47,9 @@ Local checkout of this tree still works: add the directory as a marketplace root
 
 On Windows, change Claude `.mcp.json` `command` to `python` or `py -3` (not `python3`). Do not rewrite the committed POSIX `.mcp.json`. Codex installer already writes `sys.executable`.
 
-Confirm tools appear (`list_workflows`, `get_guide`, …). With the app down, tools return a clean error — the MCP process stays up.
+Confirm tools appear (`list_workflows`, `get_guide`, `get_local_access_status`, …). With the app down, tools return a clean error — the MCP process stays up.
+
+**Trusted Local Full Access** is default-off in 360 Hextile Settings. Enable Full Access there (this also turns MCP on) so Codex, Claude, Grok, and in-app Copilot can use supported operations and the eight local-file tools without Hextile consent prompts. Revoke is immediate; turning the MCP master OFF also closes effective authority. `get_local_access_status` works with MCP OFF and no Studio. Canonical source is this repo's `mcp/hextile_mcp.py`; Claude `.mcp.json` and the Codex installer already point at it.
 
 ## Install — Grok
 
@@ -95,7 +97,7 @@ Uninstall:
 python3 codex/install.py --uninstall
 ```
 
-Restart Codex and run `/mcp` — you should see `hextile`.
+Restart Codex and run `/mcp` — you should see `hextile` and the same eight local-file tools as Claude.
 
 Requires **Codex ≥ 0.34.0**. v1 is **stdio only** (no streamable HTTP dual-stack).
 
@@ -153,6 +155,16 @@ Install id stays **`360-hextile@360-hextile`**. Hosts do **not** auto-update.
 | `get_sequence` | `GET /api/sequences/{id}` |
 | `list_sequences` | `GET /api/sequences/` |
 | `stop_sequence` | `POST /api/sequences/{id}/stop` |
+| `get_local_access_status` | `GET /api/agent/mcp-status` |
+| `local_file_stat` | `GET /api/agent/local-files/stat` |
+| `local_file_read` | `GET /api/agent/local-files/read` |
+| `local_file_write_begin` | `POST /api/agent/local-files/writes` |
+| `local_file_write_append` | `POST /api/agent/local-files/writes/{write_id}/chunks` |
+| `local_file_write_abort` | `POST /api/agent/local-files/writes/{write_id}/abort` |
+| `local_file_write_commit` | `POST /api/agent/local-files/writes/{write_id}/commit` |
+| `local_file_write_status` | `GET /api/agent/local-files/writes/requests/{request_id}` |
+
+Enable **Trusted Local Full Access** in Settings, then revoke from the same control. File tools forward only to APP loopback; `local_file_write_status` can reconcile the original `request_id` after revoke or MCP OFF.
 
 Instruction surface: **`skills/360-hextile/SKILL.md`** (general automation hub), **`skills/shader/SKILL.md`** (authoritative Shader file procedure), **`skills/fractal/SKILL.md`** (Fractal Workshop) and **`skills/upres/SKILL.md`**.
 Codex `AGENTS-fragment.md` is a frontmatter-stripped copy of the hub — edit SKILL only.

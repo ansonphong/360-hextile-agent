@@ -12,8 +12,10 @@ For Project Shader coding, invoke the installed **`shader`** skill (`/360-hextil
 
 For Fractal Workshop, invoke the installed **`fractal`** skill. It owns fresh context, the human Fractal grant, closed edits, session transport, Save and Save As, and native sequence or folder publication. Shader Apply is unchanged.
 
+Ordinary human Apply, Fractal grant, Follow, session pick, and Copilot per-call approval still apply. **Trusted Local Full Access** is a default-off Settings switch. Effective authority is MCP enabled AND the raw trust bit. `get_local_access_status` reports `enabled` and `trusted_local_full_access` even with MCP OFF and no Studio. While effective, Codex, Claude, Grok, and in-app Copilot use supported Hextile operations, inherit the current Shader/Fractal document leases, and may read/write OS-account-accessible regular files through the eight local-file tools without Hextile consent prompts. Revoke is immediate and visible. Native validation, CAS, leases, entitlements, and receipt reconciliation remain. Enable Full Access in Settings (this also turns MCP on); revoke clears the trust bit; turning the MCP master OFF also closes effective authority.
+
 - Copilot never queues GPU (`REFUSE_RENDER_COPILOT`). Press RENDER, or use `run_workflow` here.
-- MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`). Gate A stays locked. Follow is not Copilot Auto.
+- MCP live-apply (`apply_config_delta`) needs follow ON (`REFUSE_LIVE_FOLLOW_OFF`) unless Trusted Local Full Access is effective. Gate A stays locked. Follow is not Copilot Auto.
 - MCP cannot `goto` or arm/operate an open Layers session (`REFUSE_NAV_MCP`, `REFUSE_LAYERS_MCP`).
   The seven Generate Layer tools below are the narrow saved-render exception; live target requires an approved in-app Copilot turn.
 - MCP cannot arm Spot Clone, choose its source/destination in the viewer, or force a commit. The three Spot Clone tools below can act on an explicit saved render; `target=live` requires an approved internal Copilot turn with an already prepared operation.
@@ -119,8 +121,8 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `restore_hotkey` | Restore one Hotkey to its factory bindings | **yes** |
 | `reset_hotkeys` | Clear Hotkey binding overrides; the single-key switch stays | **yes** |
 | `get_shader_context` | Read Shader identity, manifest and bounded source-free Playable aliases/helper signatures. Source and resolved authoring bytes require include_source/grant; include_formula is separate. No Import, delete, or Apply | no |
-| `get_shader_parameters` | Read exposed mounted Shader parameter IDs, labels, types, bounds, choices and values with a fresh witness. MCP enabled; no source grant or Follow needed for this read | no |
-| `set_shader_parameter` | Set one value with that exact witness while MCP and Follow are on; use `operation=status` and the original `client_request_id` after an uncertain reply. APP checks runtime bounds, writability and conflicts | **yes** |
+| `get_shader_parameters` | Read exposed mounted Shader parameter IDs, values, bounds, exact witness, authoring `writable`, and this session's `follow_ready` or block reason. MCP enabled; no source grant or Follow needed for this read | no |
+| `set_shader_parameter` | Set one witnessed value only when this MCP session is selected and `follow_ready`. Use `operation=status` with the original `client_request_id` after an uncertain reply, even if selection or Follow changes. `applied` acknowledges an edit, not Save | **yes** |
 | `propose_shader` | Post a legacy shader candidate or Board, preserving Playable convention/envelope bytes and declarations in every row. Complete controls use the attested workspace. No prepare, consume, Import, delete, or Board Accept | **yes** |
 | `control_shader_timeline` | Play, pause, seek, or reset the mounted Shader session through Follow and an exact owner witness; use its status branch with the same caller ID after an uncertain reply | **yes** |
 | `preflight_shader_sequence` | Check a confirmed saved Shader revision, exact rational interval and explicit native output; returns a deterministic sequence ID before queueing | no |
@@ -146,6 +148,27 @@ There is **no** separate workflow-envelope format — only `.hextile.json`. Pref
 | `control_fractal_sequence` | Stop or resume native work, or cancel, retry, or open the current export attempt | **yes** |
 | `preflight_fractal_sequence_export` | Check a separate folder publication and keep its transaction_fingerprint | no |
 | `export_fractal_sequence` | Publish only that preflighted folder intent | **yes** |
+| `get_local_access_status` | Read MCP enabled and effective Trusted Local Full Access; works with MCP OFF and no Studio | no |
+| `local_file_stat` | Stat one absolute regular file (`size`, `sha256`, opaque `version`) | no |
+| `local_file_read` | Read a bounded chunk (`data` ≤ 32 KiB decoded; complete JSON ≤ 65536 bytes) | no |
+| `local_file_write_begin` | Start staged create (`expected_sha256` null) or CAS replace (64-hex SHA-256) | **yes** |
+| `local_file_write_append` | Append one ordered Base64 chunk (≤ 64 KiB decoded); identical index/data is idempotent | **yes** |
+| `local_file_write_abort` | Abort staging; does not publish the target | **yes** |
+| `local_file_write_commit` | Publish staged bytes; create-only or CAS replace of durable bytes | **yes** |
+| `local_file_write_status` | Reconcile the original `request_id` after a lost reply, revoke, or MCP OFF | no |
+
+### Trusted local files
+
+Call `get_local_access_status` first. `local_file_stat`, `local_file_read`, and write begin/append/abort/commit require effective trust at APP. `get_local_access_status` and `local_file_write_status` remain usable when MCP is disabled so a caller can inspect authority and the original receipt.
+
+1. `local_file_stat(path)` → `{size, sha256, version}` for an absolute regular file. No symlink following.
+2. `local_file_read(path, expected_version, offset, max_bytes, encoding?)` → `{offset, next_offset, eof, encoding, data, version}`. `encoding` is `utf-8` or `base64`. APP may return base64 rather than omit bytes.
+3. Create: `local_file_write_begin(request_id, path, mode="create", expected_sha256=null, total_bytes)` then ordered `local_file_write_append(write_id, index, data_base64)`, then `local_file_write_commit(write_id)`. Create-only never overwrites.
+4. Replace: begin with `mode="replace"` and the current 64-hex `expected_sha256`. Commit uses CAS; a stale target is `stale_cas` / conflict, not a partial publish.
+5. `local_file_write_abort(write_id)` abandons staging.
+6. Lost commit, revoke, or MCP OFF: `local_file_write_status(request_id)` with the original canonical UUIDv4. Status is `pending`, `committed`, `aborted`, `revoked`, `conflict`, or `outcome_unknown`. Do not mint a new ID or auto-retry `outcome_unknown`.
+
+The proxy forwards only to APP loopback and supplies `X-Hextile-Mcp-Session`. Do not send session, path, or content as private header arguments.
 
 ### Selection guide
 

@@ -145,6 +145,14 @@ TOOL_NAMES = (
     "control_fractal_sequence",
     "preflight_fractal_sequence_export",
     "export_fractal_sequence",
+    "get_local_access_status",
+    "local_file_stat",
+    "local_file_read",
+    "local_file_write_begin",
+    "local_file_write_append",
+    "local_file_write_abort",
+    "local_file_write_commit",
+    "local_file_write_status",
 )
 
 # OPEN-4 annotations (read-only vs mutating).
@@ -197,6 +205,10 @@ _READ_ONLY = frozenset(
         "preflight_fractal_sequence",
         "get_fractal_sequence",
         "preflight_fractal_sequence_export",
+        "get_local_access_status",
+        "local_file_stat",
+        "local_file_read",
+        "local_file_write_status",
     }
 )
 _MUTATING = frozenset(
@@ -253,6 +265,10 @@ _MUTATING = frozenset(
         "render_fractal_sequence",
         "control_fractal_sequence",
         "export_fractal_sequence",
+        "local_file_write_begin",
+        "local_file_write_append",
+        "local_file_write_abort",
+        "local_file_write_commit",
     }
 )
 _BATCH_TOOLS = frozenset(
@@ -281,6 +297,7 @@ _DESTRUCTIVE = frozenset(
         "cancel_batch",
         "cancel_model_download",
         "cancel_layer_generation",
+        "local_file_write_commit",
     }
 )
 _CONTROL_TOOLS = frozenset(
@@ -311,6 +328,23 @@ _HOTKEY_OPS = dict(zip(
     ("list", "inspect", "set", "remove", "restore", "reset"),
 ))
 _SPOT_CLONE_TOOLS = frozenset({"preflight_spot_clone", "clone_spot", "get_spot_clone"})
+_LOCAL_FILE_DIAGNOSTICS = frozenset({"get_local_access_status", "local_file_write_status"})
+_ABS_PATH = {
+    "type": "string", "minLength": 1, "maxLength": 4096,
+    "description": "Absolute native filesystem path accessible to the APP OS account.",
+}
+_CANONICAL_UUID = {
+    "type": "string", "format": "uuid",
+    "description": "Canonical lowercase hyphenated UUIDv4.",
+}
+_WRITE_ID = {"type": "string", "minLength": 1, "maxLength": 128}
+_FILE_VERSION = {"type": "string", "minLength": 1, "maxLength": 256}
+_SHA256_HEX = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+_EXPECTED_SHA256 = {"anyOf": [{"type": "null"}, _SHA256_HEX]}
+_DATA_BASE64 = {
+    "type": "string", "minLength": 1, "maxLength": 87384,
+    "description": "Base64 chunk; at most 64 KiB decoded.",
+}
 _PRIVATE_ARGUMENT_KEYS = frozenset(
     {
         "actor",
@@ -2332,6 +2366,82 @@ TOOLS: list[dict[str, Any]] = [
                     "Keep the known attempt id. A lost POST is unknown until get_fractal_sequence shows that attempt. "
                     "Do not post a different fingerprint to force a new attempt.",
      "inputSchema": _FRACTAL_EXPORT_SUBMIT, "annotations": _annotations("export_fractal_sequence")},
+    _tool_def(
+        "get_local_access_status",
+        "Read MCP enabled and effective Trusted Local Full Access from GET /api/agent/mcp-status. "
+        "Works without Studio and when MCP is disabled. Does not grant file access.",
+        {},
+    ),
+    _tool_def(
+        "local_file_stat",
+        "Stat one absolute regular file through APP. Requires effective Trusted Local Full Access. "
+        "Returns size, sha256, and an opaque version. No symlink following.",
+        {"path": _ABS_PATH},
+        required=["path"],
+    ),
+    _tool_def(
+        "local_file_read",
+        "Read a bounded chunk of one absolute regular file. Requires effective trust and expected_version. "
+        "Decoded data is at most 32 KiB; the complete JSON result is at most 65536 UTF-8 bytes. "
+        "encoding is utf-8 or base64; APP may return base64 rather than omit bytes.",
+        {
+            "path": _ABS_PATH,
+            "expected_version": _FILE_VERSION,
+            "offset": {"type": "integer", "minimum": 0},
+            "max_bytes": {"type": "integer", "minimum": 1, "maximum": 32768},
+            "encoding": {"type": "string", "enum": ["utf-8", "base64"]},
+        },
+        required=["path", "expected_version", "offset", "max_bytes"],
+    ),
+    _tool_def(
+        "local_file_write_begin",
+        "Start a staged create or replace. Canonical UUIDv4 request_id. "
+        "create requires expected_sha256 null; replace requires the current 64-hex SHA-256. "
+        "Same request_id and body replay the receipt. Requires effective trust. "
+        "The proxy supplies X-Hextile-Mcp-Session; do not send it as a tool argument.",
+        {
+            "request_id": _CANONICAL_UUID,
+            "path": _ABS_PATH,
+            "mode": {"type": "string", "enum": ["create", "replace"]},
+            "expected_sha256": _EXPECTED_SHA256,
+            "total_bytes": {"type": "integer", "minimum": 0},
+        },
+        required=["request_id", "path", "mode", "expected_sha256", "total_bytes"],
+    ),
+    _tool_def(
+        "local_file_write_append",
+        "Append one ordered chunk to a pending write. data_base64 is at most 64 KiB decoded. "
+        "Identical index and data retry is idempotent. Requires effective trust.",
+        {
+            "write_id": _WRITE_ID,
+            "index": {"type": "integer", "minimum": 0},
+            "data_base64": _DATA_BASE64,
+        },
+        required=["write_id", "index", "data_base64"],
+    ),
+    _tool_def(
+        "local_file_write_abort",
+        "Abort staging for write_id. Terminal status is aborted. Does not publish the target. "
+        "Requires effective trust. Recover the original request with local_file_write_status.",
+        {"write_id": _WRITE_ID},
+        required=["write_id"],
+    ),
+    _tool_def(
+        "local_file_write_commit",
+        "Publish staged bytes. create is create-only; replace uses SHA-256 CAS and can replace durable bytes. "
+        "Requires effective trust at commit. A lost reply is local_file_write_status with the original "
+        "request_id; never mint a new id or auto-retry outcome_unknown.",
+        {"write_id": _WRITE_ID},
+        required=["write_id"],
+    ),
+    _tool_def(
+        "local_file_write_status",
+        "Read the caller-bound write receipt by original request_id. "
+        "Works after trust revoke or MCP master OFF. Status is pending, committed, aborted, revoked, "
+        "conflict, or outcome_unknown. No path or content. Wrong session is not the original receipt.",
+        {"request_id": _CANONICAL_UUID},
+        required=["request_id"],
+    ),
 ]
 
 _timeline_tool = next(t for t in TOOLS if t["name"] == "control_shader_timeline")
@@ -2666,6 +2776,14 @@ class HextileMcpServer:
             "control_fractal_sequence": self._control_fractal_sequence,
             "preflight_fractal_sequence_export": self._preflight_fractal_sequence_export,
             "export_fractal_sequence": self._export_fractal_sequence,
+            "get_local_access_status": self._get_local_access_status,
+            "local_file_stat": self._local_file_stat,
+            "local_file_read": self._local_file_read,
+            "local_file_write_begin": self._local_file_write_begin,
+            "local_file_write_append": self._local_file_write_append,
+            "local_file_write_abort": self._local_file_write_abort,
+            "local_file_write_commit": self._local_file_write_commit,
+            "local_file_write_status": self._local_file_write_status,
         }
         self._handlers.update({
             name: (lambda args, op=op: self.client.hotkeys_request(op, args))
@@ -2753,7 +2871,11 @@ class HextileMcpServer:
         progress_token: Any = None,
         operation_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        if not self.internal_mode and getattr(self.client, "_opener", None) is None:
+        if (
+            not self.internal_mode
+            and getattr(self.client, "_opener", None) is None
+            and name not in _LOCAL_FILE_DIAGNOSTICS
+        ):
             probe = getattr(self.client, "request_json", None)
             if callable(probe):
                 try:
@@ -3553,6 +3675,54 @@ class HextileMcpServer:
     def _export_fractal_sequence(self, args: dict[str, Any]) -> Any:
         self._validate_fractal_args("export_fractal_sequence", args)
         return self.client.export_fractal_sequence(args)
+
+    def _get_local_access_status(self, args: dict[str, Any]) -> Any:
+        return self.client.get_local_access_status()
+
+    def _local_file_stat(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_stat(args.get("path"))
+
+    def _local_file_read(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_read(
+            args.get("path"),
+            expected_version=args.get("expected_version"),
+            offset=args.get("offset"),
+            max_bytes=args.get("max_bytes"),
+            encoding=args.get("encoding"),
+        )
+
+    def _local_file_write_begin(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_write_begin(
+            request_id=args.get("request_id"),
+            path=args.get("path"),
+            mode=args.get("mode"),
+            expected_sha256=args.get("expected_sha256"),
+            total_bytes=args.get("total_bytes"),
+            session_id=self._ensure_session_id(),
+        )
+
+    def _local_file_write_append(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_write_append(
+            write_id=args.get("write_id"),
+            index=args.get("index"),
+            data_base64=args.get("data_base64"),
+            session_id=self._ensure_session_id(),
+        )
+
+    def _local_file_write_abort(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_write_abort(
+            args.get("write_id"), session_id=self._ensure_session_id(),
+        )
+
+    def _local_file_write_commit(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_write_commit(
+            args.get("write_id"), session_id=self._ensure_session_id(),
+        )
+
+    def _local_file_write_status(self, args: dict[str, Any]) -> Any:
+        return self.client.local_file_write_status(
+            args.get("request_id"), session_id=self._ensure_session_id(),
+        )
 
     def _get_live_context(self, args: dict[str, Any]) -> Any:
         try:
