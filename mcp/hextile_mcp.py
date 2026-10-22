@@ -494,6 +494,11 @@ _WORKSPACE_GUIDANCE = (
     "get_shader_update include_source_diagnostics:true requests bounded logical locations under the current source grant, witness and candidate. "
     "Omitted/false keeps the source-free legacy receipt. Missing support requires upgrade/reconnect, never downgrade. "
     "Workspace schema 2 is format support; source-modules/1 execution requires APP available and executable_capabilities. "
+    "frame-accumulation/1 is executable only when listed in executable_capabilities. "
+    "Author extensions.frame_accumulation as {schema:1, prior_frame_binding:\"hxPriorColor\", decay_parameter:\"trail_decay\"} "
+    "plus sorted required capability frame-accumulation/1, and sample hxPriorColor at hx.mapUv. "
+    "Do not author it when the id is absent. Do not add a get_capabilities flag, a pass graph, a history file, or a new tool. "
+    "Replay from the start, at most 240 frames, full frame at most 2048×1024. "
     "Recognized capabilities, guide text and version numbers do not prove execution or installed host filesystem access. "
     "Open requires a clean Project or My Library Shader, Follow and whole-source read/propose authority. "
     "Only acknowledged open returns files after APP acquires the mounted readonly/autosave hold. "
@@ -2251,7 +2256,8 @@ TOOLS: list[dict[str, Any]] = [
          "studio_surface_id": _WORKSPACE_WITNESS,
          "existing_workspace": _shader_closed({"action": {"const": "adopt"}, "expected_content_digest": _WORKSPACE_DIGEST}),
          "workspace_schema": {"type": "integer", "const": 2},
-     }, ("existing_workspace", "workspace_schema", "expected_working_revision", "expected_document_hash", "expected_source_hash")) | {
+         "attribution_schema": {"type": "integer", "const": 1},
+     }, ("existing_workspace", "workspace_schema", "attribution_schema", "expected_working_revision", "expected_document_hash", "expected_source_hash")) | {
          "anyOf": [{"required": ["expected_working_revision", "expected_document_hash", "expected_source_hash"]},
                    {"required": ["workspace_schema"], "not": {"anyOf": [
                        {"required": [key]} for key in ("expected_working_revision", "expected_document_hash", "expected_source_hash")]}}],
@@ -2265,7 +2271,8 @@ TOOLS: list[dict[str, Any]] = [
         "Preserve exact candidate/digest/generation and check_attempt; new registration invalidates old located diagnostics.",
         {"handle": _WORKSPACE_ID, "change_id": _WORKSPACE_CHANGE,
          "expected_generation": {"type": "integer", "minimum": 0, "maximum": 2**53 - 2},
-         "content_digest": _WORKSPACE_DIGEST},
+         "content_digest": _WORKSPACE_DIGEST,
+         "attribution_action": {"enum": ["include", "skip_optional"]}},
         required=["handle", "change_id", "expected_generation", "content_digest"]),
     _tool_def("get_shader_update",
         "Read one exact authorized workspace receipt, including attachment_state, check_attempt, "

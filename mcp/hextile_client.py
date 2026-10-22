@@ -94,8 +94,9 @@ def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
         base = {"expected_working_revision", "expected_document_hash", "expected_source_hash"}
         supplied = base & args.keys()
         if (not required - base <= args.keys()
-                or args.keys() - required - {"existing_workspace", "workspace_schema"}
+                or args.keys() - required - {"existing_workspace", "workspace_schema", "attribution_schema"}
                 or ("workspace_schema" in args and (type(args["workspace_schema"]) is not int or args["workspace_schema"] != 2))
+                or ("attribution_schema" in args and (type(args["attribution_schema"]) is not int or args["attribution_schema"] != 1))
                 or (supplied and supplied != base)
                 or (args.get("workspace_schema") != 2 and supplied != base)):
             refuse()
@@ -114,10 +115,12 @@ def validate_shader_workspace(operation: str, args: Mapping[str, Any]) -> None:
                 refuse()
         return
     required = {"handle", "change_id", "expected_generation", "content_digest"} if operation == "register" else {"handle", "change_id", "project_context_witness"}
-    optional = {"include_source_diagnostics"} if operation == "get" else set()
+    optional = {"include_source_diagnostics"} if operation == "get" else (
+        {"attribution_action"} if operation == "register" else set())
     if (operation not in {"register", "get"} or not required <= args.keys()
             or args.keys() - required - optional
-            or ("include_source_diagnostics" in args and type(args["include_source_diagnostics"]) is not bool)):
+            or ("include_source_diagnostics" in args and type(args["include_source_diagnostics"]) is not bool)
+            or ("attribution_action" in args and args["attribution_action"] not in {"include", "skip_optional"})):
         refuse()
     handle, change_id = args["handle"], args["change_id"]
     if type(handle) is not str or _WORKSPACE_HANDLE.fullmatch(handle) is None:
@@ -1642,6 +1645,8 @@ class Client:
         validate_shader_workspace("register", args)
         handle = urllib.parse.quote(args["handle"], safe="")
         body = {key: args[key] for key in ("change_id", "expected_generation", "content_digest")}
+        if "attribution_action" in args:
+            body["attribution_action"] = args["attribution_action"]
         result = self._shader_workspace_request("POST", f"/api/agent/shader-workspaces/{handle}/updates", body)
         if (not isinstance(result, dict) or result.get("handle") != args["handle"]
                 or result.get("change_id") != args["change_id"]

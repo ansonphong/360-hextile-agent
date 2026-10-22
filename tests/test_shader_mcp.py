@@ -47,6 +47,71 @@ def test_served_best_practices_preserve_shader_credit_authority() -> None:
         assert "permission to distribute" in text
 
 
+def test_attribution_guides_teach_limits_and_typed_proposal() -> None:
+    from hextile_mcp import load_guide
+
+    guide = load_guide("best-practices")["markdown"]
+    skill = (ROOT / "skills" / "shader" / "SKILL.md").read_text(encoding="utf-8")
+    for text in (guide, skill):
+        assert "64 KiB" in text and "256 KiB" in text
+        assert "depth at most 2" in text or "depth 2" in text
+        assert "30 seconds" in text and "four" in text
+        assert "attribution_proposal" in text
+        assert "Attribution wasn't added in this selection edit" in text
+        assert "skip_optional" in text
+        assert "reopen" in text and "v2" in text
+        assert "do not claim a page was read" in text.lower() or "when it was not" in text
+
+
+def test_attribution_wire_negotiation_and_exact_refusal_receipt(monkeypatch) -> None:
+    open_args = {
+        "shader": {"origin": "user", "shaderId": "aurora"},
+        "project_context_witness": "witness",
+        "studio_surface_id": "surface",
+        "workspace_schema": 2,
+        "attribution_schema": 1,
+    }
+    jsonschema.validate(open_args, _schema("open_shader_workspace")["inputSchema"])
+    register_args = {
+        "handle": "abc", "change_id": "abc:1", "expected_generation": 0,
+        "content_digest": "sha256:" + "ab" * 32, "attribution_action": "skip_optional",
+    }
+    jsonschema.validate(register_args, _schema("register_shader_update")["inputSchema"])
+    from hextile_client import validate_shader_workspace
+    validate_shader_workspace("open", open_args)
+    validate_shader_workspace("register", register_args)
+    sent = {}
+
+    def capture(method, path, body=None, **kwargs):
+        sent["body"] = body
+        detail = {
+            "code": "attribution_required",
+            "message": "Write the supplied provenance bytes and register again.",
+            "recovery": "write_provenance_and_rehash",
+            "attribution": {
+                "schema": 1, "status": "replacement_required", "generation": 7,
+                "content_digest": register_args["content_digest"],
+                "provenance_utf8": "{\"extensions\":{}}",
+                "provenance_sha256": "sha256:" + "cd" * 32,
+            },
+        }
+        raw = json.dumps({"detail": detail}).encode("utf-8")
+        assert len(raw) <= 65536
+        raise HextileClientError(
+            f"HTTP 409 POST {path}: {raw.decode()}", status_code=409, body=raw.decode(), kind="http")
+
+    client = Client("http://127.0.0.1:9")
+    monkeypatch.setattr(client, "request_json", capture)
+    with pytest.raises(HextileClientError) as refused:
+        client.register_shader_update(register_args)
+    assert sent["body"]["attribution_action"] == "skip_optional"
+    assert refused.value.receipt["code"] == "attribution_required"
+    assert refused.value.receipt["attribution"]["provenance_utf8"] == "{\"extensions\":{}}"
+    payload = __import__("hextile_mcp", fromlist=["error_payload"]).error_payload(refused.value)
+    assert payload["receipt"]["attribution"]["status"] == "replacement_required"
+    assert payload["receipt"]["attribution"]["provenance_utf8"].encode("utf-8") == b"{\"extensions\":{}}"
+
+
 def _parameter_witness() -> dict[str, Any]:
     return {"studio_surface_id": "surface", "project_context_witness": "wit",
             "shader": {"origin": "user", "shaderId": "aurora"},
